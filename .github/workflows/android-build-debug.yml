@@ -51,6 +51,7 @@ jobs:
           wget -O "$TMP_ZIP" "$ANDROID_CMDLINE_ZIP_URL"
           unzip -q "$TMP_ZIP" -d "$ANDROID_SDK_ROOT/cmdline-tools"
 
+          # Normalize ZIP layout variations to .../cmdline-tools/latest
           if [ -d "$ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools" ]; then
             mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools/latest"
             mv "$ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools/"* "$ANDROID_SDK_ROOT/cmdline-tools/latest/"
