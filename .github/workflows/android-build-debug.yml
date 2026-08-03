@@ -6,12 +6,12 @@ on:
     branches:
       - feature/start-finish-period-and-rename
 
+env:
+  ANDROID_SDK_ROOT: /usr/local/android-sdk
+
 jobs:
   build:
     runs-on: ubuntu-latest
-
-    env:
-      ANDROID_SDK_ROOT: /usr/local/android-sdk
 
     steps:
       - name: Checkout repo
@@ -34,63 +34,44 @@ jobs:
           npm -v
           npx -v || true
 
-      - name: Install Android commandline tools and SDK components (robust)
+      - name: Install prereq tools
         run: |
-          set -eux
-
-          ANDROID_CMDLINE_ZIP_URL="https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip"
-          TMP_ZIP="/tmp/cmdline-tools.zip"
-
           sudo apt-get update
           sudo apt-get install -y unzip wget zip
 
-          sudo mkdir -p "$ANDROID_SDK_ROOT"
-          sudo chown -R "$USER":"$USER" "$ANDROID_SDK_ROOT"
-          mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
-
-          wget -O "$TMP_ZIP" "$ANDROID_CMDLINE_ZIP_URL"
-          unzip -q "$TMP_ZIP" -d "$ANDROID_SDK_ROOT/cmdline-tools"
-
-          # Normalize ZIP layout variations to .../cmdline-tools/latest
+      - name: Download and install Android commandline tools
+        run: |
+          set -eux
+          TMP_ZIP="/tmp/cmdline-tools.zip"
+          wget -O "$TMP_ZIP" "https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip"
+          sudo mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
+          sudo unzip -q "$TMP_ZIP" -d "$ANDROID_SDK_ROOT/cmdline-tools"
           if [ -d "$ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools" ]; then
-            mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools/latest"
-            mv "$ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools/"* "$ANDROID_SDK_ROOT/cmdline-tools/latest/"
+            sudo mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools/latest"
+            sudo mv "$ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools/"* "$ANDROID_SDK_ROOT/cmdline-tools/latest/"
           else
-            mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools/latest"
-            mv "$ANDROID_SDK_ROOT/cmdline-tools/"* "$ANDROID_SDK_ROOT/cmdline-tools/latest/" || true
+            sudo mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools/latest"
+            sudo mv "$ANDROID_SDK_ROOT/cmdline-tools/"* "$ANDROID_SDK_ROOT/cmdline-tools/latest/" || true
           fi
-
           export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$PATH"
-
-          # debug info
-          java -version || true
-          ls -la "$ANDROID_SDK_ROOT" || true
-          ls -la "$ANDROID_SDK_ROOT/cmdline-tools" || true
-          sdkmanager --version || true
-
-          yes | sdkmanager --sdk_root="$ANDROID_SDK_ROOT" "platform-tools" "platforms;android-33" "build-tools;33.0.2"
+          yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_SDK_ROOT" "platform-tools" "platforms;android-33" "build-tools;33.0.2"
 
       - name: Accept Android SDK licenses
         run: |
           export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$PATH"
-          yes | sdkmanager --licenses --sdk_root="$ANDROID_SDK_ROOT"
+          yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses --sdk_root="$ANDROID_SDK_ROOT"
 
-      - name: Debug env (optional)
+      - name: Debug env
         run: |
           echo "JAVA_HOME=${JAVA_HOME:-not-set}"
-          env | sort
-
-      - name: Install dependencies (verbose, with fallback)
-        run: |
-          set -eux
           node -v
           npm -v
-          npm config get registry || true
-          npm ci --loglevel verbose || {
-            echo "npm ci failed — attempting fallback npm install --legacy-peer-deps"
-            npm cache verify || npm cache clean --force || true
-            npm install --legacy-peer-deps --loglevel verbose
-          }
+          env | sort
+
+      - name: Install dependencies (verbose, fallback)
+        run: |
+          set -eux
+          npm ci --loglevel verbose || (npm cache verify || true; npm install --legacy-peer-deps --loglevel verbose)
 
       - name: Build web assets (Vite)
         run: npm run build
@@ -98,15 +79,14 @@ jobs:
       - name: Install Capacitor CLI locally
         run: npm i --no-save @capacitor/cli @capacitor/core
 
-      - name: Init Capacitor (if android/ not present)
+      - name: Init Capacitor (if needed)
         run: |
           if [ ! -d android ]; then
             npx cap init "SLX Comperative" "com.example.slxcomperative" --web-dir=dist
           fi
 
-      - name: Add Android platform (idempotent)
-        run: |
-          npx cap add android || true
+      - name: Add Android platform
+        run: npx cap add android || true
 
       - name: Copy web build to Android project
         run: npx cap copy android
@@ -114,7 +94,7 @@ jobs:
       - name: Ensure gradlew executable
         run: chmod +x android/gradlew || true
 
-      - name: Build Android debug APK (Gradle)
+      - name: Build Android debug APK
         working-directory: android
         run: ./gradlew assembleDebug --no-daemon --stacktrace
 
