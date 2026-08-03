@@ -27,6 +27,12 @@ jobs:
         with:
           node-version: '18'
 
+      - name: Debug: Node / NPM versions
+        run: |
+          node -v
+          npm -v
+          npx -v || true
+
       - name: Install Android commandline tools and SDK components (robust)
         run: |
           set -eux
@@ -44,6 +50,7 @@ jobs:
           wget -O "$TMP_ZIP" "$ANDROID_CMDLINE_ZIP_URL"
           unzip -q "$TMP_ZIP" -d "$ANDROID_SDK_ROOT/cmdline-tools"
 
+          # Handle ZIP layout variations
           if [ -d "$ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools" ]; then
             mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools/latest"
             mv "$ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools/"* "$ANDROID_SDK_ROOT/cmdline-tools/latest/"
@@ -63,10 +70,26 @@ jobs:
           yes | sdkmanager --sdk_root="$ANDROID_SDK_ROOT" "platform-tools" "platforms;android-33" "build-tools;33.0.2"
 
       - name: Accept Android SDK licenses
-        run: yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses --sdk_root=$ANDROID_SDK_ROOT
+        run: |
+          export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$PATH"
+          yes | sdkmanager --licenses --sdk_root=$ANDROID_SDK_ROOT
 
-      - name: Install dependencies
-        run: npm ci
+      - name: Debug env (optional)
+        run: |
+          echo "JAVA_HOME=${JAVA_HOME:-not-set}"
+          env | sort
+
+      - name: Install dependencies (verbose, with fallback)
+        run: |
+          set -eux
+          node -v
+          npm -v
+          npm config get registry || true
+          npm ci --loglevel verbose || {
+            echo "npm ci failed — attempting fallback npm install --legacy-peer-deps"
+            npm cache verify || npm cache clean --force || true
+            npm install --legacy-peer-deps --loglevel verbose
+          }
 
       - name: Build web assets (Vite)
         run: npm run build
@@ -92,7 +115,7 @@ jobs:
 
       - name: Build Android debug APK (Gradle)
         working-directory: android
-        run: ./gradlew assembleDebug --no-daemon
+        run: ./gradlew assembleDebug --no-daemon --stacktrace
 
       - name: Upload debug APK artifact
         uses: actions/upload-artifact@v4
