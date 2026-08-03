@@ -21,6 +21,10 @@ interface AppContextType {
   deleteAjuste: (id: string) => void;
   safraAtiva: string | null;
   setSafraAtiva: (id: string | null) => void;
+  workLabel: string;
+  setWorkLabel: (label: string) => void;
+  startPeriod: (funcionarioId: string, date?: string, startTime?: string) => string; // returns registro id
+  finishPeriod: (registroId: string, endTime?: string) => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -41,6 +45,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [adiantamentos, setAdiantamentos] = useState<Adiantamento[]>(() => loadFromStorage('adiantamentos', []));
   const [ajustes, setAjustes] = useState<AjusteIndividual[]>(() => loadFromStorage('ajustes', []));
   const [safraAtiva, setSafraAtiva] = useState<string | null>(() => loadFromStorage('safraAtiva', null));
+  const [workLabel, setWorkLabel] = useState<string>(() => loadFromStorage('workLabel', 'trabalho'));
 
   useEffect(() => { localStorage.setItem('safras', JSON.stringify(safras)); }, [safras]);
   useEffect(() => { localStorage.setItem('funcionarios', JSON.stringify(funcionarios)); }, [funcionarios]);
@@ -48,6 +53,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => { localStorage.setItem('adiantamentos', JSON.stringify(adiantamentos)); }, [adiantamentos]);
   useEffect(() => { localStorage.setItem('ajustes', JSON.stringify(ajustes)); }, [ajustes]);
   useEffect(() => { localStorage.setItem('safraAtiva', JSON.stringify(safraAtiva)); }, [safraAtiva]);
+  useEffect(() => { localStorage.setItem('workLabel', JSON.stringify(workLabel)); }, [workLabel]);
 
   const addSafra = (s: Safra) => setSafras(prev => [...prev, s]);
   const updateSafra = (s: Safra) => setSafras(prev => prev.map(x => x.id === s.id ? s : x));
@@ -65,6 +71,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setAdiantamentos(prev => prev.filter(x => x.funcionarioId !== id));
     setAjustes(prev => prev.filter(x => x.funcionarioId !== id));
   };
+
   const addRegistro = (r: RegistroHoras) => setRegistros(prev => [...prev, r]);
   const updateRegistro = (r: RegistroHoras) => setRegistros(prev => prev.map(x => x.id === r.id ? r : x));
   const deleteRegistro = (id: string) => setRegistros(prev => prev.filter(x => x.id !== id));
@@ -72,6 +79,38 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const deleteAdiantamento = (id: string) => setAdiantamentos(prev => prev.filter(x => x.id !== id));
   const addAjuste = (a: AjusteIndividual) => setAjustes(prev => [...prev, a]);
   const deleteAjuste = (id: string) => setAjustes(prev => prev.filter(x => x.id !== id));
+
+  // Start a period for a specific employee. Returns the created registro id.
+  const startPeriod = (funcionarioId: string, date?: string, startTime?: string) => {
+    if (!safraAtiva) throw new Error('Nenhuma safra/trabalho ativa');
+    const now = startTime ? new Date(startTime) : new Date();
+    const registro: RegistroHoras = {
+      id: crypto.randomUUID(),
+      safraId: safraAtiva,
+      funcionarioId,
+      data: date ? new Date(date).toISOString() : now.toISOString(),
+      startTime: now.toISOString(),
+      status: 'iniciado',
+    };
+    setRegistros(prev => [...prev, registro]);
+    return registro.id;
+  };
+
+  // Finish a period by registro id. Calculates horasTrabalhadas when possible.
+  const finishPeriod = (registroId: string, endTime?: string) => {
+    setRegistros(prev => prev.map(r => {
+      if (r.id !== registroId) return r;
+      const end = endTime ? new Date(endTime) : new Date();
+      const updated: RegistroHoras = { ...r, endTime: end.toISOString(), status: 'finalizado' };
+      if (r.startTime) {
+        const start = new Date(r.startTime);
+        const diffMs = end.getTime() - start.getTime();
+        const hours = diffMs > 0 ? diffMs / (1000 * 60 * 60) : 0;
+        updated.horasTrabalhadas = Math.round((hours + Number.EPSILON) * 100) / 100; // 2 decimals
+      }
+      return updated;
+    }));
+  };
 
   return (
     <AppContext.Provider value={{
@@ -82,6 +121,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       addAdiantamento, deleteAdiantamento,
       addAjuste, deleteAjuste,
       safraAtiva, setSafraAtiva,
+      workLabel, setWorkLabel,
+      startPeriod, finishPeriod,
     }}>
       {children}
     </AppContext.Provider>
