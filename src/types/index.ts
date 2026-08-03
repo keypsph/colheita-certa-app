@@ -17,9 +17,12 @@ export interface Funcionario {
 export interface RegistroHoras {
   id: string;
   safraId: string;
-  data: string;
-  horasTrabalhadas: number;
-  status: 'trabalhou' | 'nao_trabalhou' | 'outro';
+  funcionarioId?: string; // opcional: pode ser um registro por funcionário
+  data: string; // data do registro (ISO)
+  startTime?: string; // ISO timestamp quando o período foi iniciado
+  endTime?: string; // ISO timestamp quando finalizado
+  horasTrabalhadas?: number; // em horas (float). Opcional para compatibilidade com registros antigos
+  status: 'iniciado' | 'finalizado' | 'trabalhou' | 'nao_trabalhou' | 'outro';
   motivoOutro?: string;
 }
 
