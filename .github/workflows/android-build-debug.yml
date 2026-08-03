@@ -6,12 +6,13 @@ on:
     branches:
       - feature/start-finish-period-and-rename
 
-env:
-  ANDROID_SDK_ROOT: /usr/local/android-sdk
-
 jobs:
   build:
     runs-on: ubuntu-latest
+
+    env:
+      ANDROID_SDK_ROOT: /usr/local/android-sdk
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -43,14 +44,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y unzip wget zip
 
-          sudo mkdir -p $ANDROID_SDK_ROOT
-          sudo chown -R $USER:$USER $ANDROID_SDK_ROOT
-          mkdir -p $ANDROID_SDK_ROOT/cmdline-tools
+          sudo mkdir -p "$ANDROID_SDK_ROOT"
+          sudo chown -R "$USER":"$USER" "$ANDROID_SDK_ROOT"
+          mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
 
           wget -O "$TMP_ZIP" "$ANDROID_CMDLINE_ZIP_URL"
           unzip -q "$TMP_ZIP" -d "$ANDROID_SDK_ROOT/cmdline-tools"
 
-          # Handle ZIP layout variations
           if [ -d "$ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools" ]; then
             mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools/latest"
             mv "$ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools/"* "$ANDROID_SDK_ROOT/cmdline-tools/latest/"
@@ -63,8 +63,8 @@ jobs:
 
           # debug info
           java -version || true
-          ls -la $ANDROID_SDK_ROOT || true
-          ls -la $ANDROID_SDK_ROOT/cmdline-tools || true
+          ls -la "$ANDROID_SDK_ROOT" || true
+          ls -la "$ANDROID_SDK_ROOT/cmdline-tools" || true
           sdkmanager --version || true
 
           yes | sdkmanager --sdk_root="$ANDROID_SDK_ROOT" "platform-tools" "platforms;android-33" "build-tools;33.0.2"
@@ -72,7 +72,7 @@ jobs:
       - name: Accept Android SDK licenses
         run: |
           export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$PATH"
-          yes | sdkmanager --licenses --sdk_root=$ANDROID_SDK_ROOT
+          yes | sdkmanager --licenses --sdk_root="$ANDROID_SDK_ROOT"
 
       - name: Debug env (optional)
         run: |
