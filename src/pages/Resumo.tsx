@@ -6,10 +6,9 @@ import { ptBR } from 'date-fns/locale';
 import { useState, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { RegistroHoras } from '@/types';
 
 export default function Resumo() {
-  const { funcionarios, registros, adiantamentos, safras, safraAtiva, ajustes } = useApp();
+  const { funcionarios, registros, adiantamentos, safras, safraAtiva, ajustes, workLabel } = useApp();
   const [currentMonth, setCurrentMonth] = useState(new Date());
 
   const safra = safras.find(s => s.id === safraAtiva);
@@ -22,20 +21,34 @@ export default function Resumo() {
     const horasPadrao = safra.horasPadrao || 8;
     const valorDiaria = safra.valorDiaria || 0;
 
-    // Calculate per-employee earnings
     const ganhosPorFunc = funcs.map(f => {
       const ajustesFunc = ajustes.filter(a => a.funcionarioId === f.id && a.safraId === safraAtiva);
       
-      // Get all unique dates from registros that might apply to this employee
-      const allDates = Array.from(new Set(registrosSafra.map(r => format(parseISO(r.data), 'yyyy-MM-dd'))));
+      const allDates = Array.from(new Set(
+        registrosSafra
+          .filter(r => r.data)
+          .map(r => {
+            try {
+              return format(parseISO(r.data), 'yyyy-MM-dd');
+            } catch (e) {
+              return null;
+            }
+          })
+          .filter((d): d is string => d !== null)
+      ));
       
       let horasFunc = 0;
       let diasFunc = 0;
 
       allDates.forEach(dateStr => {
-        const registrosDoDia = registrosSafra.filter(r => format(parseISO(r.data), 'yyyy-MM-dd') === dateStr);
+        const registrosDoDia = registrosSafra.filter(r => {
+          try {
+            return r.data && format(parseISO(r.data), 'yyyy-MM-dd') === dateStr;
+          } catch (e) {
+            return false;
+          }
+        });
         
-        // 1. Check for individual point control (status 'finalizado')
         const pontoIndividual = registrosDoDia.find(r => r.funcionarioId === f.id && r.status === 'finalizado');
         if (pontoIndividual) {
           diasFunc++;
@@ -43,10 +56,16 @@ export default function Resumo() {
           return;
         }
 
-        // 2. Check for individual adjustments
-        const ajuste = ajustesFunc.find(a => format(parseISO(a.data), 'yyyy-MM-dd') === dateStr);
+        const ajuste = ajustesFunc.find(a => {
+          try {
+            return a.data && format(parseISO(a.data), 'yyyy-MM-dd') === dateStr;
+          } catch (e) {
+            return false;
+          }
+        });
+        
         if (ajuste) {
-          if (ajuste.tipo === 'ausencia') return; // Skip day
+          if (ajuste.tipo === 'ausencia') return;
           if (ajuste.tipo === 'horas_diferentes') {
             diasFunc++;
             horasFunc += ajuste.horasTrabalhadas || 0;
@@ -54,7 +73,6 @@ export default function Resumo() {
           }
         }
 
-        // 3. Check for general records (no funcionarioId)
         const registroGeral = registrosDoDia.find(r => !r.funcionarioId && (r.status === 'trabalhou' || r.status === 'outro'));
         if (registroGeral) {
           diasFunc++;
@@ -81,7 +99,20 @@ export default function Resumo() {
     });
 
     const totalHorasGeral = ganhosPorFunc.reduce((s, f) => s + f.horasTotais, 0);
-    const diasTrabalhadosGeral = Array.from(new Set(registrosSafra.filter(r => r.status !== 'nao_trabalhou' && r.status !== 'iniciado').map(r => format(parseISO(r.data), 'yyyy-MM-dd')))).length;
+    
+    const diasTrabalhadosGeral = Array.from(new Set(
+      registrosSafra
+        .filter(r => r.data && r.status !== 'nao_trabalhou' && r.status !== 'iniciado')
+        .map(r => {
+          try {
+            return format(parseISO(r.data), 'yyyy-MM-dd');
+          } catch (e) {
+            return null;
+          }
+        })
+        .filter((d): d is string => d !== null)
+    )).length;
+
     const diasNaoTrabalhados = registrosSafra.filter(r => r.status === 'nao_trabalhou').length;
 
     const totalAdiantamentos = adiantamentos
@@ -111,13 +142,23 @@ export default function Resumo() {
   const daysInMonth = eachDayOfInterval({ start: monthStart, end: monthEnd });
 
   const getDayStatus = (day: Date): 'worked' | 'not_worked' | null => {
-    const dayStr = format(day, 'yyyy-MM-dd');
-    const registrosDoDia = registrosSafra.filter(r => format(parseISO(r.data), 'yyyy-MM-dd') === dayStr);
-    
-    if (registrosDoDia.length === 0) return null;
-    if (registrosDoDia.some(r => r.status === 'trabalhou' || r.status === 'outro' || r.status === 'finalizado')) return 'worked';
-    if (registrosDoDia.some(r => r.status === 'nao_trabalhou')) return 'not_worked';
-    return null;
+    try {
+      const dayStr = format(day, 'yyyy-MM-dd');
+      const registrosDoDia = registrosSafra.filter(r => {
+        try {
+          return r.data && format(parseISO(r.data), 'yyyy-MM-dd') === dayStr;
+        } catch (e) {
+          return false;
+        }
+      });
+      
+      if (registrosDoDia.length === 0) return null;
+      if (registrosDoDia.some(r => r.status === 'trabalhou' || r.status === 'outro' || r.status === 'finalizado')) return 'worked';
+      if (registrosDoDia.some(r => r.status === 'nao_trabalhou')) return 'not_worked';
+      return null;
+    } catch (e) {
+      return null;
+    }
   };
 
   const prevMonth = () => setCurrentMonth(prev => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
@@ -144,6 +185,8 @@ export default function Resumo() {
     );
   }
 
+  const currentLabel = (workLabel || 'trabalho').charAt(0).toUpperCase() + (workLabel || 'trabalho').slice(1);
+
   return (
     <div className="min-h-screen pb-20 px-4 pt-6">
       <div className="mx-auto max-w-lg">
@@ -151,9 +194,16 @@ export default function Resumo() {
           <BarChart3 className="h-8 w-8 text-primary" />
           <h1 className="text-2xl font-bold">Resumo</h1>
         </div>
-        <p className="text-sm text-muted-foreground mb-4">{workLabel.charAt(0).toUpperCase() + workLabel.slice(1)}: {safra?.nome}</p>
+        <p className="text-sm text-muted-foreground mb-4">{currentLabel}: {safra?.nome}</p>
 
-        {resumoGeral && (
+        {!resumoGeral ? (
+          <Card>
+            <CardContent className="py-8 text-center text-muted-foreground flex flex-col items-center gap-2">
+              <AlertCircle className="h-6 w-6 text-destructive" />
+              Nenhum dado para exibir neste período.
+            </CardContent>
+          </Card>
+        ) : (
           <>
             <div className="grid grid-cols-2 gap-2 mb-4">
               <Card>

@@ -31,81 +31,108 @@ export default function AcertoFinal() {
   const funcs = funcionarios.filter(f => f.safraId === safraAtiva);
   const registrosSafra = registros.filter(r => r.safraId === safraAtiva);
 
-  const calcularResumo = (funcId: string): ResumoFuncionario => {
-    const func = funcs.find(f => f.id === funcId)!;
-    const horasPadrao = safra?.horasPadrao || 8;
-    const valorDiaria = func.valorDiaria || safra?.valorDiaria || 0;
-    const valorHora = valorDiaria / horasPadrao;
+  const calcularResumo = (funcId: string): ResumoFuncionario | null => {
+    try {
+      const func = funcs.find(f => f.id === funcId);
+      if (!func) return null;
 
-    let diasTrabalhados = 0;
-    let horasTotais = 0;
-    const detalhamentoDias: Array<{ data: string; horas: number }> = [];
+      const horasPadrao = safra?.horasPadrao || 8;
+      const valorDiaria = func.valorDiaria || safra?.valorDiaria || 0;
+      const valorHora = valorDiaria / horasPadrao;
 
-    const ajustesFunc = ajustes.filter(a => a.funcionarioId === funcId && a.safraId === safraAtiva);
-    
-    // Get all unique dates from registros
-    const allDates = Array.from(new Set(registrosSafra.map(r => format(parseISO(r.data), 'yyyy-MM-dd'))));
-    
-    allDates.forEach(dateStr => {
-      const registrosDoDia = registrosSafra.filter(r => format(parseISO(r.data), 'yyyy-MM-dd') === dateStr);
+      let diasTrabalhados = 0;
+      let horasTotais = 0;
+      const detalhamentoDias: Array<{ data: string; horas: number }> = [];
+
+      const ajustesFunc = ajustes.filter(a => a.funcionarioId === funcId && a.safraId === safraAtiva);
       
-      let horasDoDia = 0;
-      let trabalhouNoDia = false;
-
-      // 1. Check for individual point control (status 'finalizado')
-      const pontoIndividual = registrosDoDia.find(r => r.funcionarioId === f.id && r.status === 'finalizado');
-      if (pontoIndividual) {
-        trabalhouNoDia = true;
-        horasDoDia = pontoIndividual.horasTrabalhadas || 0;
-      } else {
-        // 2. Check for individual adjustments
-        const ajuste = ajustesFunc.find(a => format(parseISO(a.data), 'yyyy-MM-dd') === dateStr);
-        if (ajuste) {
-          if (ajuste.tipo === 'ausencia') return; // Skip day
-          if (ajuste.tipo === 'horas_diferentes') {
-            trabalhouNoDia = true;
-            horasDoDia = ajuste.horasTrabalhadas || 0;
+      const allDates = Array.from(new Set(
+        registrosSafra
+          .filter(r => r.data)
+          .map(r => {
+            try {
+              return format(parseISO(r.data), 'yyyy-MM-dd');
+            } catch (e) {
+              return null;
+            }
+          })
+          .filter((d): d is string => d !== null)
+      ));
+      
+      allDates.forEach(dateStr => {
+        const registrosDoDia = registrosSafra.filter(r => {
+          try {
+            return r.data && format(parseISO(r.data), 'yyyy-MM-dd') === dateStr;
+          } catch (e) {
+            return false;
           }
+        });
+        
+        let horasDoDia = 0;
+        let trabalhouNoDia = false;
+
+        const pontoIndividual = registrosDoDia.find(r => r.funcionarioId === func.id && r.status === 'finalizado');
+        if (pontoIndividual) {
+          trabalhouNoDia = true;
+          horasDoDia = pontoIndividual.horasTrabalhadas || 0;
         } else {
-          // 3. Check for general records (no funcionarioId)
-          const registroGeral = registrosDoDia.find(r => !r.funcionarioId && (r.status === 'trabalhou' || r.status === 'outro'));
-          if (registroGeral) {
-            trabalhouNoDia = true;
-            horasDoDia = registroGeral.horasTrabalhadas || 0;
+          const ajuste = ajustesFunc.find(a => {
+            try {
+              return a.data && format(parseISO(a.data), 'yyyy-MM-dd') === dateStr;
+            } catch (e) {
+              return false;
+            }
+          });
+          
+          if (ajuste) {
+            if (ajuste.tipo === 'ausencia') return;
+            if (ajuste.tipo === 'horas_diferentes') {
+              trabalhouNoDia = true;
+              horasDoDia = ajuste.horasTrabalhadas || 0;
+            }
+          } else {
+            const registroGeral = registrosDoDia.find(r => !r.funcionarioId && (r.status === 'trabalhou' || r.status === 'outro'));
+            if (registroGeral) {
+              trabalhouNoDia = true;
+              horasDoDia = registroGeral.horasTrabalhadas || 0;
+            }
           }
         }
-      }
 
-      if (trabalhouNoDia) {
-        diasTrabalhados++;
-        horasTotais += horasDoDia;
-        detalhamentoDias.push({ data: dateStr, horas: horasDoDia });
-      }
-    });
+        if (trabalhouNoDia) {
+          diasTrabalhados++;
+          horasTotais += horasDoDia;
+          detalhamentoDias.push({ data: dateStr, horas: horasDoDia });
+        }
+      });
 
-    const horasEsperadas = diasTrabalhados * horasPadrao;
-    const horasExtras = horasTotais - horasEsperadas;
-    const valorBruto = horasTotais * valorHora;
+      const horasEsperadas = diasTrabalhados * horasPadrao;
+      const horasExtras = horasTotais - horasEsperadas;
+      const valorBruto = horasTotais * valorHora;
 
-    const totalAdiantamentos = adiantamentos
-      .filter(a => a.funcionarioId === funcId && a.safraId === safraAtiva)
-      .reduce((sum, a) => sum + a.valor, 0);
+      const totalAdiantamentos = adiantamentos
+        .filter(a => a.funcionarioId === funcId && a.safraId === safraAtiva)
+        .reduce((sum, a) => sum + a.valor, 0);
 
-    const totalDescontos = ajustesFunc
-      .filter(a => a.tipo === 'desconto')
-      .reduce((sum, a) => sum + (a.valorDesconto || 0), 0);
+      const totalDescontos = ajustesFunc
+        .filter(a => a.tipo === 'desconto')
+        .reduce((sum, a) => sum + (a.valorDesconto || 0), 0);
 
-    return {
-      id: funcId,
-      nome: func.nome,
-      diasTrabalhados,
-      horasTotais,
-      horasExtras,
-      valorBruto,
-      totalAdiantamentos: totalAdiantamentos + totalDescontos,
-      valorLiquido: valorBruto - totalAdiantamentos - totalDescontos,
-      detalhamentoDias: detalhamentoDias.sort((a, b) => new Date(a.data).getTime() - new Date(b.data).getTime()),
-    };
+      return {
+        id: funcId,
+        nome: func.nome,
+        diasTrabalhados,
+        horasTotais,
+        horasExtras,
+        valorBruto,
+        totalAdiantamentos: totalAdiantamentos + totalDescontos,
+        valorLiquido: valorBruto - totalAdiantamentos - totalDescontos,
+        detalhamentoDias: detalhamentoDias.sort((a, b) => new Date(a.data).getTime() - new Date(b.data).getTime()),
+      };
+    } catch (e) {
+      console.error('Erro ao calcular resumo do funcionário:', e);
+      return null;
+    }
   };
 
   const exportarPDF = async (resumo: ResumoFuncionario) => {
@@ -119,9 +146,12 @@ export default function AcertoFinal() {
       doc.text('Acerto Final', 14, 20);
       doc.setFontSize(12);
       doc.text(`Funcionário: ${resumo.nome}`, 14, 32);
-      doc.text(`Safra: ${safra?.nome || ''}`, 14, 40);
+      doc.text(`${(workLabel || 'trabalho').charAt(0).toUpperCase() + (workLabel || 'trabalho').slice(1)}: ${safra?.nome || ''}`, 14, 40);
+      
       if (safra?.dataInicio && safra?.dataFim) {
-        doc.text(`Período: ${format(parseISO(safra.dataInicio), 'dd/MM/yyyy')} - ${format(parseISO(safra.dataFim), 'dd/MM/yyyy')}`, 14, 48);
+        try {
+          doc.text(`Período: ${format(parseISO(safra.dataInicio), 'dd/MM/yyyy')} - ${format(parseISO(safra.dataFim), 'dd/MM/yyyy')}`, 14, 48);
+        } catch (e) {}
       }
 
       doc.setFontSize(11);
@@ -136,7 +166,6 @@ export default function AcertoFinal() {
       doc.setFont(undefined as any, 'bold');
       doc.text(`VALOR A RECEBER: R$ ${resumo.valorLiquido.toFixed(2)}`, 14, y);
 
-      // Tabela de Dias Trabalhados
       y += 10;
       doc.setFont(undefined as any, 'normal');
       doc.setFontSize(12);
@@ -145,10 +174,13 @@ export default function AcertoFinal() {
       autoTable(doc, {
         startY: y + 6,
         head: [['Data', 'Horas']],
-        body: resumo.detalhamentoDias.map(d => [
-          format(parseISO(d.data), 'dd/MM/yyyy'),
-          `${d.horas.toFixed(2)}h`
-        ]),
+        body: resumo.detalhamentoDias.map(d => {
+          try {
+            return [format(parseISO(d.data), 'dd/MM/yyyy'), `${d.horas.toFixed(2)}h`];
+          } catch (e) {
+            return [d.data, `${d.horas.toFixed(2)}h`];
+          }
+        }),
       });
 
       y = (doc as any).lastAutoTable.finalY + 10;
@@ -158,11 +190,13 @@ export default function AcertoFinal() {
         autoTable(doc, {
           startY: y + 6,
           head: [['Data', 'Valor', 'Descrição']],
-          body: adiantamentosFunc.map(a => [
-            format(parseISO(a.data), 'dd/MM/yyyy'),
-            `R$ ${a.valor.toFixed(2)}`,
-            a.descricao || '-',
-          ]),
+          body: adiantamentosFunc.map(a => {
+            try {
+              return [format(parseISO(a.data), 'dd/MM/yyyy'), `R$ ${a.valor.toFixed(2)}`, a.descricao || '-'];
+            } catch (e) {
+              return [a.data, `R$ ${a.valor.toFixed(2)}`, a.descricao || '-'];
+            }
+          }),
         });
       }
 
@@ -198,7 +232,7 @@ export default function AcertoFinal() {
         <div className="mx-auto max-w-lg">
           <div className="mb-6 flex items-center gap-3">
             <FileText className="h-8 w-8 text-primary" />
-            <h1 className="text-2xl font-bold">Acerto Final</h1>
+            <h1 className="text-2xl font-bold">Acerto</h1>
           </div>
           <Card>
             <CardContent className="py-8 text-center text-muted-foreground flex flex-col items-center gap-2">
@@ -211,6 +245,8 @@ export default function AcertoFinal() {
     );
   }
 
+  const currentLabel = (workLabel || 'trabalho').charAt(0).toUpperCase() + (workLabel || 'trabalho').slice(1);
+
   return (
     <div className="min-h-screen pb-20 px-4 pt-6">
       <div className="mx-auto max-w-lg">
@@ -218,7 +254,7 @@ export default function AcertoFinal() {
           <FileText className="h-8 w-8 text-primary" />
           <h1 className="text-2xl font-bold">Acerto</h1>
         </div>
-        <p className="text-sm text-muted-foreground mb-4">{workLabel.charAt(0).toUpperCase() + workLabel.slice(1)}: {safra?.nome}</p>
+        <p className="text-sm text-muted-foreground mb-4">{currentLabel}: {safra?.nome}</p>
 
         {funcs.length === 0 ? (
           <Card>
@@ -230,6 +266,8 @@ export default function AcertoFinal() {
           <div className="space-y-3">
             {funcs.map(f => {
               const resumo = calcularResumo(f.id);
+              if (!resumo) return null;
+              
               const isSelected = selectedFunc === f.id;
               return (
                 <Card

@@ -32,7 +32,8 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 function loadFromStorage<T>(key: string, defaultValue: T): T {
   try {
     const stored = localStorage.getItem(key);
-    return stored ? JSON.parse(stored) : defaultValue;
+    if (!stored || stored === 'null' || stored === 'undefined') return defaultValue;
+    return JSON.parse(stored) as T;
   } catch {
     return defaultValue;
   }
@@ -92,7 +93,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       status: 'iniciado',
     };
     
-    // Check if there is already an initiated period for this employee and remove it
     setRegistros(prev => {
       const filtered = prev.filter(r => !(r.funcionarioId === funcionarioId && r.status === 'iniciado'));
       return [...filtered, registro];
@@ -110,7 +110,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const start = new Date(r.startTime);
         const diffMs = end.getTime() - start.getTime();
         const hours = diffMs > 0 ? diffMs / (1000 * 60 * 60) : 0;
-        updated.horasTrabalhadas = Math.round((hours + Number.EPSILON) * 100) / 100; // 2 decimals
+        updated.horasTrabalhadas = Math.round((hours + Number.EPSILON) * 100) / 100;
       }
       return updated;
     }));
@@ -125,7 +125,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       addAdiantamento, deleteAdiantamento,
       addAjuste, deleteAjuste,
       safraAtiva, setSafraAtiva,
-      workLabel, setWorkLabel,
+      workLabel: workLabel || 'trabalho',
+      setWorkLabel,
       startPeriod, finishPeriod,
     }}>
       {children}
