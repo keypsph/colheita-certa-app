@@ -3,10 +3,13 @@ import { useApp } from '@/contexts/AppContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { FileText, AlertCircle, Download } from 'lucide-react';
-import { format } from 'date-fns';
+import { format, parseISO } from 'date-fns';
 import { toast } from 'sonner';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { Filesystem, Directory } from '@capacitor/filesystem';
+import { Share } from '@capacitor/share';
+import { Capacitor } from '@capacitor/core';
 
 interface ResumoFuncionario {
   id: string;
@@ -17,109 +20,210 @@ interface ResumoFuncionario {
   valorBruto: number;
   totalAdiantamentos: number;
   valorLiquido: number;
+  detalhamentoDias: Array<{ data: string; horas: number }>;
 }
 
 export default function AcertoFinal() {
-  const { funcionarios, registros, adiantamentos, safras, safraAtiva, ajustes } = useApp();
+  const { funcionarios, registros, adiantamentos, safras, safraAtiva, ajustes, workLabel } = useApp();
   const [selectedFunc, setSelectedFunc] = useState<string | null>(null);
 
   const safra = safras.find(s => s.id === safraAtiva);
   const funcs = funcionarios.filter(f => f.safraId === safraAtiva);
   const registrosSafra = registros.filter(r => r.safraId === safraAtiva);
 
-  const calcularResumo = (funcId: string): ResumoFuncionario => {
-    const func = funcs.find(f => f.id === funcId)!;
-    const horasPadrao = safra?.horasPadrao || 8;
-    const valorDiaria = func.valorDiaria || safra?.valorDiaria || 0;
-    const valorHora = valorDiaria / horasPadrao;
+  const calcularResumo = (funcId: string): ResumoFuncionario | null => {
+    try {
+      const func = funcs.find(f => f.id === funcId);
+      if (!func) return null;
 
-    let diasTrabalhados = 0;
-    let horasTotais = 0;
+      const horasPadrao = safra?.horasPadrao || 8;
+      const valorDiaria = func.valorDiaria || safra?.valorDiaria || 0;
+      const valorHora = valorDiaria / horasPadrao;
 
-    // Check individual adjustments
-    const ajustesFunc = ajustes.filter(a => a.funcionarioId === funcId && a.safraId === safraAtiva);
-    const ausenciaDatas = new Set(ajustesFunc.filter(a => a.tipo === 'ausencia').map(a => a.data));
+      let diasTrabalhados = 0;
+      let horasTotais = 0;
+      const detalhamentoDias: Array<{ data: string; horas: number }> = [];
 
-    registrosSafra.forEach(r => {
-      if (ausenciaDatas.has(r.data)) return; // skip days with absence for this employee
-      if (r.status === 'trabalhou' || r.status === 'outro') {
-        // Check if this employee has different hours for this day
-        const ajusteHoras = ajustesFunc.find(a => a.tipo === 'horas_diferentes' && a.data === r.data);
-        diasTrabalhados++;
-        horasTotais += ajusteHoras ? (ajusteHoras.horasTrabalhadas || 0) : r.horasTrabalhadas;
-      }
-    });
+      const ajustesFunc = ajustes.filter(a => a.funcionarioId === funcId && a.safraId === safraAtiva);
+      
+      const allDates = Array.from(new Set(
+        registrosSafra
+          .filter(r => r.data)
+          .map(r => {
+            try {
+              return format(parseISO(r.data), 'yyyy-MM-dd');
+            } catch (e) {
+              return null;
+            }
+          })
+          .filter((d): d is string => d !== null)
+      ));
+      
+      allDates.forEach(dateStr => {
+        const registrosDoDia = registrosSafra.filter(r => {
+          try {
+            return r.data && format(parseISO(r.data), 'yyyy-MM-dd') === dateStr;
+          } catch (e) {
+            return false;
+          }
+        });
+        
+        let horasDoDia = 0;
+        let trabalhouNoDia = false;
 
-    const horasEsperadas = diasTrabalhados * horasPadrao;
-    const horasExtras = horasTotais - horasEsperadas;
-    const valorBruto = horasTotais * valorHora;
+        const pontoIndividual = registrosDoDia.find(r => r.funcionarioId === func.id && r.status === 'finalizado');
+        if (pontoIndividual) {
+          trabalhouNoDia = true;
+          horasDoDia = pontoIndividual.horasTrabalhadas || 0;
+        } else {
+          const ajuste = ajustesFunc.find(a => {
+            try {
+              return a.data && format(parseISO(a.data), 'yyyy-MM-dd') === dateStr;
+            } catch (e) {
+              return false;
+            }
+          });
+          
+          if (ajuste) {
+            if (ajuste.tipo === 'ausencia') return;
+            if (ajuste.tipo === 'horas_diferentes') {
+              trabalhouNoDia = true;
+              horasDoDia = ajuste.horasTrabalhadas || 0;
+            }
+          } else {
+            const registroGeral = registrosDoDia.find(r => !r.funcionarioId && (r.status === 'trabalhou' || r.status === 'outro'));
+            if (registroGeral) {
+              trabalhouNoDia = true;
+              horasDoDia = registroGeral.horasTrabalhadas || 0;
+            }
+          }
+        }
 
-    const totalAdiantamentos = adiantamentos
-      .filter(a => a.funcionarioId === funcId && a.safraId === safraAtiva)
-      .reduce((sum, a) => sum + a.valor, 0);
+        if (trabalhouNoDia) {
+          diasTrabalhados++;
+          horasTotais += horasDoDia;
+          detalhamentoDias.push({ data: dateStr, horas: horasDoDia });
+        }
+      });
 
-    const totalDescontos = ajustesFunc
-      .filter(a => a.tipo === 'desconto')
-      .reduce((sum, a) => sum + (a.valorDesconto || 0), 0);
+      const horasEsperadas = diasTrabalhados * horasPadrao;
+      const horasExtras = horasTotais - horasEsperadas;
+      const valorBruto = horasTotais * valorHora;
 
-    return {
-      id: funcId,
-      nome: func.nome,
-      diasTrabalhados,
-      horasTotais,
-      horasExtras,
-      valorBruto,
-      totalAdiantamentos: totalAdiantamentos + totalDescontos,
-      valorLiquido: valorBruto - totalAdiantamentos - totalDescontos,
-    };
+      const totalAdiantamentos = adiantamentos
+        .filter(a => a.funcionarioId === funcId && a.safraId === safraAtiva)
+        .reduce((sum, a) => sum + a.valor, 0);
+
+      const totalDescontos = ajustesFunc
+        .filter(a => a.tipo === 'desconto')
+        .reduce((sum, a) => sum + (a.valorDesconto || 0), 0);
+
+      return {
+        id: funcId,
+        nome: func.nome,
+        diasTrabalhados,
+        horasTotais,
+        horasExtras,
+        valorBruto,
+        totalAdiantamentos: totalAdiantamentos + totalDescontos,
+        valorLiquido: valorBruto - totalAdiantamentos - totalDescontos,
+        detalhamentoDias: detalhamentoDias.sort((a, b) => new Date(a.data).getTime() - new Date(b.data).getTime()),
+      };
+    } catch (e) {
+      console.error('Erro ao calcular resumo do funcionário:', e);
+      return null;
+    }
   };
 
-  const exportarPDF = (resumo: ResumoFuncionario) => {
-    const doc = new jsPDF();
-    const adiantamentosFunc = adiantamentos.filter(
-      a => a.funcionarioId === resumo.id && a.safraId === safraAtiva
-    );
+  const exportarPDF = async (resumo: ResumoFuncionario) => {
+    try {
+      const doc = new jsPDF();
+      const adiantamentosFunc = adiantamentos.filter(
+        a => a.funcionarioId === resumo.id && a.safraId === safraAtiva
+      );
 
-    doc.setFontSize(18);
-    doc.text('Acerto Final', 14, 20);
-    doc.setFontSize(12);
-    doc.text(`Funcionário: ${resumo.nome}`, 14, 32);
-    doc.text(`Safra: ${safra?.nome || ''}`, 14, 40);
-    if (safra?.dataInicio && safra?.dataFim) {
-      doc.text(`Período: ${format(new Date(safra.dataInicio), 'dd/MM/yyyy')} - ${format(new Date(safra.dataFim), 'dd/MM/yyyy')}`, 14, 48);
-    }
+      doc.setFontSize(18);
+      doc.text('Acerto Final', 14, 20);
+      doc.setFontSize(12);
+      doc.text(`Funcionário: ${resumo.nome}`, 14, 32);
+      doc.text(`${(workLabel || 'trabalho').charAt(0).toUpperCase() + (workLabel || 'trabalho').slice(1)}: ${safra?.nome || ''}`, 14, 40);
+      
+      if (safra?.dataInicio && safra?.dataFim) {
+        try {
+          doc.text(`Período: ${format(parseISO(safra.dataInicio), 'dd/MM/yyyy')} - ${format(parseISO(safra.dataFim), 'dd/MM/yyyy')}`, 14, 48);
+        } catch (e) {}
+      }
 
-    doc.setFontSize(11);
-    let y = 62;
-    doc.text(`Dias trabalhados: ${resumo.diasTrabalhados}`, 14, y); y += 8;
-    doc.text(`Horas totais: ${resumo.horasTotais.toFixed(2)}h`, 14, y); y += 8;
-    doc.text(`Horas extras: ${resumo.horasExtras >= 0 ? '+' : ''}${resumo.horasExtras.toFixed(2)}h`, 14, y); y += 8;
-    doc.text(`Valor bruto: R$ ${resumo.valorBruto.toFixed(2)}`, 14, y); y += 8;
-    doc.text(`Total descontos: R$ ${resumo.totalAdiantamentos.toFixed(2)}`, 14, y); y += 14;
+      doc.setFontSize(11);
+      let y = 62;
+      doc.text(`Dias trabalhados: ${resumo.diasTrabalhados}`, 14, y); y += 8;
+      doc.text(`Horas totais: ${resumo.horasTotais.toFixed(2)}h`, 14, y); y += 8;
+      doc.text(`Horas extras: ${resumo.horasExtras >= 0 ? '+' : ''}${resumo.horasExtras.toFixed(2)}h`, 14, y); y += 8;
+      doc.text(`Valor bruto: R$ ${resumo.valorBruto.toFixed(2)}`, 14, y); y += 8;
+      doc.text(`Total descontos: R$ ${resumo.totalAdiantamentos.toFixed(2)}`, 14, y); y += 14;
 
-    doc.setFontSize(14);
-    doc.setFont(undefined as any, 'bold');
-    doc.text(`VALOR A RECEBER: R$ ${resumo.valorLiquido.toFixed(2)}`, 14, y);
+      doc.setFontSize(14);
+      doc.setFont(undefined as any, 'bold');
+      doc.text(`VALOR A RECEBER: R$ ${resumo.valorLiquido.toFixed(2)}`, 14, y);
 
-    if (adiantamentosFunc.length > 0) {
-      y += 14;
+      y += 10;
       doc.setFont(undefined as any, 'normal');
       doc.setFontSize(12);
-      doc.text('Detalhamento de Adiantamentos:', 14, y);
-
+      doc.text('Detalhamento de Dias Trabalhados:', 14, y);
+      
       autoTable(doc, {
         startY: y + 6,
-        head: [['Data', 'Valor', 'Descrição']],
-        body: adiantamentosFunc.map(a => [
-          format(new Date(a.data), 'dd/MM/yyyy'),
-          `R$ ${a.valor.toFixed(2)}`,
-          a.descricao || '-',
-        ]),
+        head: [['Data', 'Horas']],
+        body: resumo.detalhamentoDias.map(d => {
+          try {
+            return [format(parseISO(d.data), 'dd/MM/yyyy'), `${d.horas.toFixed(2)}h`];
+          } catch (e) {
+            return [d.data, `${d.horas.toFixed(2)}h`];
+          }
+        }),
       });
-    }
 
-    doc.save(`acerto-${resumo.nome.replace(/\s/g, '_')}.pdf`);
-    toast.success('PDF exportado!');
+      y = (doc as any).lastAutoTable.finalY + 10;
+
+      if (adiantamentosFunc.length > 0) {
+        doc.text('Detalhamento de Adiantamentos:', 14, y);
+        autoTable(doc, {
+          startY: y + 6,
+          head: [['Data', 'Valor', 'Descrição']],
+          body: adiantamentosFunc.map(a => {
+            try {
+              return [format(parseISO(a.data), 'dd/MM/yyyy'), `R$ ${a.valor.toFixed(2)}`, a.descricao || '-'];
+            } catch (e) {
+              return [a.data, `R$ ${a.valor.toFixed(2)}`, a.descricao || '-'];
+            }
+          }),
+        });
+      }
+
+      const fileName = `acerto-${resumo.nome.replace(/\s/g, '_')}.pdf`;
+      
+      if (Capacitor.isNativePlatform()) {
+        const pdfBase64 = doc.output('datauristring').split(',')[1];
+        const savedFile = await Filesystem.writeFile({
+          path: fileName,
+          data: pdfBase64,
+          directory: Directory.Cache
+        });
+
+        await Share.share({
+          title: 'Exportar Acerto',
+          text: `Acerto final de ${resumo.nome}`,
+          url: savedFile.uri,
+          dialogTitle: 'Compartilhar Acerto'
+        });
+      } else {
+        doc.save(fileName);
+        toast.success('PDF exportado com sucesso!');
+      }
+    } catch (error) {
+      console.error('Erro ao exportar PDF:', error);
+      toast.error('Erro ao gerar ou compartilhar o PDF.');
+    }
   };
 
   if (!safraAtiva) {
@@ -128,7 +232,7 @@ export default function AcertoFinal() {
         <div className="mx-auto max-w-lg">
           <div className="mb-6 flex items-center gap-3">
             <FileText className="h-8 w-8 text-primary" />
-            <h1 className="text-2xl font-bold">Acerto Final</h1>
+            <h1 className="text-2xl font-bold">Acerto</h1>
           </div>
           <Card>
             <CardContent className="py-8 text-center text-muted-foreground flex flex-col items-center gap-2">
@@ -141,14 +245,16 @@ export default function AcertoFinal() {
     );
   }
 
+  const currentLabel = (workLabel || 'trabalho').charAt(0).toUpperCase() + (workLabel || 'trabalho').slice(1);
+
   return (
     <div className="min-h-screen pb-20 px-4 pt-6">
       <div className="mx-auto max-w-lg">
         <div className="mb-2 flex items-center gap-3">
           <FileText className="h-8 w-8 text-primary" />
-          <h1 className="text-2xl font-bold">Acerto Final</h1>
+          <h1 className="text-2xl font-bold">Acerto</h1>
         </div>
-        <p className="text-sm text-muted-foreground mb-4">Safra: {safra?.nome}</p>
+        <p className="text-sm text-muted-foreground mb-4">{currentLabel}: {safra?.nome}</p>
 
         {funcs.length === 0 ? (
           <Card>
@@ -160,6 +266,8 @@ export default function AcertoFinal() {
           <div className="space-y-3">
             {funcs.map(f => {
               const resumo = calcularResumo(f.id);
+              if (!resumo) return null;
+              
               const isSelected = selectedFunc === f.id;
               return (
                 <Card
@@ -204,7 +312,7 @@ export default function AcertoFinal() {
                         <span className="font-bold text-lg text-primary">R$ {resumo.valorLiquido.toFixed(2)}</span>
                       </div>
                       <Button onClick={(e) => { e.stopPropagation(); exportarPDF(resumo); }} className="w-full gap-2" variant="outline">
-                        <Download className="h-4 w-4" /> Exportar PDF
+                        <Download className="h-4 w-4" /> Exportar e Compartilhar PDF
                       </Button>
                     </CardContent>
                   )}

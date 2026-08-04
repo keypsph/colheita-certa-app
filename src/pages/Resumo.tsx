@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
 export default function Resumo() {
-  const { funcionarios, registros, adiantamentos, safras, safraAtiva, ajustes } = useApp();
+  const { funcionarios, registros, adiantamentos, safras, safraAtiva, ajustes, workLabel } = useApp();
   const [currentMonth, setCurrentMonth] = useState(new Date());
 
   const safra = safras.find(s => s.id === safraAtiva);
@@ -20,42 +20,63 @@ export default function Resumo() {
 
     const horasPadrao = safra.horasPadrao || 8;
     const valorDiaria = safra.valorDiaria || 0;
-    const valorHora = valorDiaria / horasPadrao;
 
-    let totalHorasGeral = 0;
-    let diasTrabalhadosGeral = 0;
-    let diasNaoTrabalhados = 0;
-
-    registrosSafra.forEach(r => {
-      if (r.status === 'trabalhou' || r.status === 'outro') {
-        diasTrabalhadosGeral++;
-        totalHorasGeral += r.horasTrabalhadas;
-      } else if (r.status === 'nao_trabalhou') {
-        diasNaoTrabalhados++;
-      }
-    });
-
-    const totalAdiantamentos = adiantamentos
-      .filter(a => a.safraId === safraAtiva)
-      .reduce((sum, a) => sum + a.valor, 0);
-
-    const totalDescontos = ajustes
-      .filter(a => a.safraId === safraAtiva && a.tipo === 'desconto')
-      .reduce((sum, a) => sum + (a.valorDesconto || 0), 0);
-
-    // Calculate per-employee earnings
     const ganhosPorFunc = funcs.map(f => {
       const ajustesFunc = ajustes.filter(a => a.funcionarioId === f.id && a.safraId === safraAtiva);
-      const ausenciaDatas = new Set(ajustesFunc.filter(a => a.tipo === 'ausencia').map(a => a.data));
+      
+      const allDates = Array.from(new Set(
+        registrosSafra
+          .filter(r => r.data)
+          .map(r => {
+            try {
+              return format(parseISO(r.data), 'yyyy-MM-dd');
+            } catch (e) {
+              return null;
+            }
+          })
+          .filter((d): d is string => d !== null)
+      ));
       
       let horasFunc = 0;
       let diasFunc = 0;
-      registrosSafra.forEach(r => {
-        if (ausenciaDatas.has(r.data)) return;
-        if (r.status === 'trabalhou' || r.status === 'outro') {
-          const ajusteHoras = ajustesFunc.find(a => a.tipo === 'horas_diferentes' && a.data === r.data);
+
+      allDates.forEach(dateStr => {
+        const registrosDoDia = registrosSafra.filter(r => {
+          try {
+            return r.data && format(parseISO(r.data), 'yyyy-MM-dd') === dateStr;
+          } catch (e) {
+            return false;
+          }
+        });
+        
+        const pontoIndividual = registrosDoDia.find(r => r.funcionarioId === f.id && r.status === 'finalizado');
+        if (pontoIndividual) {
           diasFunc++;
-          horasFunc += ajusteHoras ? (ajusteHoras.horasTrabalhadas || 0) : r.horasTrabalhadas;
+          horasFunc += pontoIndividual.horasTrabalhadas || 0;
+          return;
+        }
+
+        const ajuste = ajustesFunc.find(a => {
+          try {
+            return a.data && format(parseISO(a.data), 'yyyy-MM-dd') === dateStr;
+          } catch (e) {
+            return false;
+          }
+        });
+        
+        if (ajuste) {
+          if (ajuste.tipo === 'ausencia') return;
+          if (ajuste.tipo === 'horas_diferentes') {
+            diasFunc++;
+            horasFunc += ajuste.horasTrabalhadas || 0;
+            return;
+          }
+        }
+
+        const registroGeral = registrosDoDia.find(r => !r.funcionarioId && (r.status === 'trabalhou' || r.status === 'outro'));
+        if (registroGeral) {
+          diasFunc++;
+          horasFunc += registroGeral.horasTrabalhadas || 0;
         }
       });
 
@@ -77,6 +98,31 @@ export default function Resumo() {
       };
     });
 
+    const totalHorasGeral = ganhosPorFunc.reduce((s, f) => s + f.horasTotais, 0);
+    
+    const diasTrabalhadosGeral = Array.from(new Set(
+      registrosSafra
+        .filter(r => r.data && r.status !== 'nao_trabalhou' && r.status !== 'iniciado')
+        .map(r => {
+          try {
+            return format(parseISO(r.data), 'yyyy-MM-dd');
+          } catch (e) {
+            return null;
+          }
+        })
+        .filter((d): d is string => d !== null)
+    )).length;
+
+    const diasNaoTrabalhados = registrosSafra.filter(r => r.status === 'nao_trabalhou').length;
+
+    const totalAdiantamentos = adiantamentos
+      .filter(a => a.safraId === safraAtiva)
+      .reduce((sum, a) => sum + a.valor, 0);
+
+    const totalDescontos = ajustes
+      .filter(a => a.safraId === safraAtiva && a.tipo === 'desconto')
+      .reduce((sum, a) => sum + (a.valorDesconto || 0), 0);
+
     const valorBrutoTotal = ganhosPorFunc.reduce((s, f) => s + f.valorBruto, 0);
     const valorLiquidoTotal = ganhosPorFunc.reduce((s, f) => s + f.liquido, 0);
 
@@ -91,23 +137,34 @@ export default function Resumo() {
     };
   }, [safra, registrosSafra, funcs, adiantamentos, ajustes, safraAtiva]);
 
-  // Calendar
   const monthStart = startOfMonth(currentMonth);
   const monthEnd = endOfMonth(currentMonth);
   const daysInMonth = eachDayOfInterval({ start: monthStart, end: monthEnd });
 
   const getDayStatus = (day: Date): 'worked' | 'not_worked' | null => {
-    const registro = registrosSafra.find(r => isSameDay(parseISO(r.data), day));
-    if (!registro) return null;
-    if (registro.status === 'nao_trabalhou') return 'not_worked';
-    return 'worked';
+    try {
+      const dayStr = format(day, 'yyyy-MM-dd');
+      const registrosDoDia = registrosSafra.filter(r => {
+        try {
+          return r.data && format(parseISO(r.data), 'yyyy-MM-dd') === dayStr;
+        } catch (e) {
+          return false;
+        }
+      });
+      
+      if (registrosDoDia.length === 0) return null;
+      if (registrosDoDia.some(r => r.status === 'trabalhou' || r.status === 'outro' || r.status === 'finalizado')) return 'worked';
+      if (registrosDoDia.some(r => r.status === 'nao_trabalhou')) return 'not_worked';
+      return null;
+    } catch (e) {
+      return null;
+    }
   };
 
   const prevMonth = () => setCurrentMonth(prev => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
   const nextMonth = () => setCurrentMonth(prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
 
-  // Pad start of month
-  const firstDayOfWeek = getDay(monthStart); // 0=Sunday
+  const firstDayOfWeek = getDay(monthStart);
 
   if (!safraAtiva) {
     return (
@@ -128,6 +185,8 @@ export default function Resumo() {
     );
   }
 
+  const currentLabel = (workLabel || 'trabalho').charAt(0).toUpperCase() + (workLabel || 'trabalho').slice(1);
+
   return (
     <div className="min-h-screen pb-20 px-4 pt-6">
       <div className="mx-auto max-w-lg">
@@ -135,16 +194,22 @@ export default function Resumo() {
           <BarChart3 className="h-8 w-8 text-primary" />
           <h1 className="text-2xl font-bold">Resumo</h1>
         </div>
-        <p className="text-sm text-muted-foreground mb-4">Safra: {safra?.nome}</p>
+        <p className="text-sm text-muted-foreground mb-4">{currentLabel}: {safra?.nome}</p>
 
-        {resumoGeral && (
+        {!resumoGeral ? (
+          <Card>
+            <CardContent className="py-8 text-center text-muted-foreground flex flex-col items-center gap-2">
+              <AlertCircle className="h-6 w-6 text-destructive" />
+              Nenhum dado para exibir neste período.
+            </CardContent>
+          </Card>
+        ) : (
           <>
-            {/* Cards de resumo */}
             <div className="grid grid-cols-2 gap-2 mb-4">
               <Card>
                 <CardContent className="py-3 text-center">
                   <Clock className="h-5 w-5 mx-auto mb-1 text-primary" />
-                  <p className="text-xs text-muted-foreground">Dias trabalhados</p>
+                  <p className="text-xs text-muted-foreground">Dias com trabalho</p>
                   <p className="text-xl font-bold">{resumoGeral.diasTrabalhadosGeral}</p>
                 </CardContent>
               </Card>
@@ -158,7 +223,7 @@ export default function Resumo() {
               <Card>
                 <CardContent className="py-3 text-center">
                   <TrendingUp className="h-5 w-5 mx-auto mb-1 text-primary" />
-                  <p className="text-xs text-muted-foreground">Horas totais</p>
+                  <p className="text-xs text-muted-foreground">Horas totais (equipe)</p>
                   <p className="text-xl font-bold">{resumoGeral.totalHorasGeral.toFixed(1)}h</p>
                 </CardContent>
               </Card>
@@ -171,7 +236,6 @@ export default function Resumo() {
               </Card>
             </div>
 
-            {/* Total geral */}
             <Card className="mb-4 border-primary/30">
               <CardContent className="py-4">
                 <div className="flex items-center justify-between">
@@ -187,7 +251,6 @@ export default function Resumo() {
               </CardContent>
             </Card>
 
-            {/* Calendário */}
             <Card className="mb-4">
               <CardHeader className="pb-2">
                 <div className="flex items-center justify-between">
@@ -223,20 +286,9 @@ export default function Resumo() {
                     );
                   })}
                 </div>
-                <div className="flex justify-center gap-4 mt-3 text-xs">
-                  <div className="flex items-center gap-1">
-                    <div className="w-3 h-3 rounded-full bg-primary" />
-                    <span>Trabalhou</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <div className="w-3 h-3 rounded-full bg-destructive" />
-                    <span>Não trabalhou</span>
-                  </div>
-                </div>
               </CardContent>
             </Card>
 
-            {/* Ganhos por funcionário */}
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-base flex items-center gap-2">
@@ -254,7 +306,7 @@ export default function Resumo() {
                     </div>
                     <div className="text-right">
                       <p className="font-bold text-sm text-primary">R$ {f.liquido.toFixed(2)}</p>
-                      {f.adiantamentos > 0 && (
+                      {(f.adiantamentos + f.descontos) > 0 && (
                         <p className="text-xs text-destructive">-R$ {(f.adiantamentos + f.descontos).toFixed(2)}</p>
                       )}
                     </div>

@@ -15,7 +15,7 @@ import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
 export default function Index() {
-  const { safras, addSafra, updateSafra, deleteSafra, safraAtiva, setSafraAtiva } = useApp();
+  const { safras, addSafra, updateSafra, deleteSafra, safraAtiva, setSafraAtiva, workLabel, setWorkLabel } = useApp();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingSafra, setEditingSafra] = useState<Safra | null>(null);
   const [nome, setNome] = useState('');
@@ -75,9 +75,33 @@ export default function Index() {
   return (
     <div className="min-h-screen pb-20 px-4 pt-6">
       <div className="mx-auto max-w-lg">
-        <div className="mb-6 flex items-center gap-3">
-          <Grape className="h-8 w-8 text-primary" />
-          <h1 className="text-2xl font-bold">Gestão de Safras</h1>
+        <div className="mb-6 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Grape className="h-8 w-8 text-primary" />
+            <h1 className="text-2xl font-bold">Gestão de {workLabel.charAt(0).toUpperCase() + workLabel.slice(1)}s</h1>
+          </div>
+          <Dialog>
+            <DialogTrigger asChild>
+              <Button variant="ghost" size="icon">
+                <Pencil className="h-4 w-4" />
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-xs">
+              <DialogHeader>
+                <DialogTitle>Nome do Rótulo</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4 pt-2">
+                <div>
+                  <Label>Rótulo (ex: safra, obra, projeto)</Label>
+                  <Input 
+                    value={workLabel} 
+                    onChange={e => setWorkLabel(e.target.value)} 
+                    placeholder="safra"
+                  />
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
         </div>
 
         <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) resetForm(); }}>

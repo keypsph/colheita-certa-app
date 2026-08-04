@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">Colheita Certa</string>
-    <string name="title_activity_main">Colheita Certa</string>
-    <string name="package_name">com.colheitacerta.app</string>
-    <string name="custom_url_scheme">com.colheitacerta.app</string>
+    <string name="app_name">SLX Cooperative</string>
+    <string name="title_activity_main">SLX Cooperative</string>
+    <string name="package_name">com.slx.cooperative</string>
+    <string name="custom_url_scheme">com.slx.cooperative</string>
 </resources>

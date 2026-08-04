@@ -24,7 +24,7 @@ interface PeriodoTrabalho {
 }
 
 export default function RegistroHorasPage() {
-  const { safras, safraAtiva, registros, addRegistro, deleteRegistro, funcionarios, ajustes, addAjuste, deleteAjuste } = useApp();
+  const { safras, safraAtiva, registros, addRegistro, deleteRegistro, funcionarios, ajustes, addAjuste, deleteAjuste, startPeriod, finishPeriod, workLabel } = useApp();
   const [data, setData] = useState<Date | undefined>(new Date());
   const [horas, setHoras] = useState(8);
   const [minutos, setMinutos] = useState(0);
@@ -169,9 +169,9 @@ export default function RegistroHorasPage() {
       <div className="mx-auto max-w-lg">
         <div className="mb-2 flex items-center gap-3">
           <Clock className="h-8 w-8 text-primary" />
-          <h1 className="text-2xl font-bold">Registro de Horas</h1>
+          <h1 className="text-2xl font-bold">Horas</h1>
         </div>
-        <p className="text-sm text-muted-foreground mb-4">Safra: {safra?.nome} — Vale para todos</p>
+        <p className="text-sm text-muted-foreground mb-4">{workLabel.charAt(0).toUpperCase() + workLabel.slice(1)}: {safra?.nome} — Vale para todos</p>
 
         <Card className="mb-4">
           <CardContent className="pt-4 space-y-4">
@@ -421,6 +421,63 @@ export default function RegistroHorasPage() {
           </DialogContent>
         </Dialog>
 
+        {/* Controle de Ponto Individual */}
+        <div className="mb-6">
+          <h2 className="font-semibold mb-3 flex items-center gap-2">
+            <Clock className="h-5 w-5 text-primary" /> Controle de Ponto Individual
+          </h2>
+          <div className="space-y-3">
+            {funcs.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-4 bg-muted rounded-lg">Nenhum funcionário cadastrado.</p>
+            ) : (
+              funcs.map(f => {
+                const registroAtivo = registros.find(r => r.funcionarioId === f.id && r.status === 'iniciado');
+                
+                return (
+                  <Card key={f.id} className={cn("transition-all", registroAtivo && "border-primary bg-primary/5 shadow-sm")}>
+                    <CardContent className="py-3 flex items-center justify-between">
+                      <div className="flex flex-col">
+                        <span className="font-medium">{f.nome}</span>
+                        {registroAtivo && (
+                          <span className="text-[10px] text-primary font-bold animate-pulse flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 bg-primary rounded-full" /> EM TRABALHO
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex gap-2">
+                        {!registroAtivo ? (
+                          <Button 
+                            size="sm" 
+                            className="bg-green-600 hover:bg-green-700 text-white gap-1 px-3"
+                            onClick={() => {
+                              startPeriod(f.id);
+                              toast.success(`Ponto iniciado para ${f.nome}`);
+                            }}
+                          >
+                            <Plus className="h-3.5 w-3.5" /> Iniciar
+                          </Button>
+                        ) : (
+                          <Button 
+                            size="sm" 
+                            variant="destructive" 
+                            className="gap-1 px-3"
+                            onClick={() => {
+                              finishPeriod(registroAtivo.id);
+                              toast.success(`Ponto finalizado para ${f.nome}`);
+                            }}
+                          >
+                            <Save className="h-3.5 w-3.5" /> Finalizar
+                          </Button>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })
+            )}
+          </div>
+        </div>
+
         {/* Histórico */}
         {registrosDaSafra.length > 0 && (
           <div>
@@ -447,9 +504,10 @@ export default function RegistroHorasPage() {
                           'text-sm',
                           r.status === 'nao_trabalhou' ? 'text-destructive/80 font-medium' : 'text-muted-foreground'
                         )}>
-                          {r.status === 'trabalhou' && `${r.horasTrabalhadas.toFixed(2)}h trabalhadas`}
+                          {(r.status === 'trabalhou' || r.status === 'finalizado') && `${r.horasTrabalhadas?.toFixed(2)}h trabalhadas`}
                           {r.status === 'nao_trabalhou' && '❌ Não trabalhou'}
-                          {r.status === 'outro' && `${r.horasTrabalhadas.toFixed(2)}h - ${r.motivoOutro}`}
+                          {r.status === 'outro' && `${r.horasTrabalhadas?.toFixed(2)}h - ${r.motivoOutro}`}
+                          {r.status === 'iniciado' && '🟡 Ponto em andamento...'}
                         </p>
                       </div>
                       <Button variant="ghost" size="icon" onClick={() => { deleteRegistro(r.id); toast.success('Registro removido'); }}>
