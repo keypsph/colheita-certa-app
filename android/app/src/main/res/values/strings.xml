@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">SLX Comperative</string>
+    <string name="title_activity_main">SLX Comperative</string>
+    <string name="package_name">com.slx.comperative</string>
+    <string name="custom_url_scheme">com.slx.comperative</string>
+</resources>
