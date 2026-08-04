@@ -3,10 +3,13 @@ import { useApp } from '@/contexts/AppContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { FileText, AlertCircle, Download } from 'lucide-react';
-import { format } from 'date-fns';
+import { format, parseISO } from 'date-fns';
 import { toast } from 'sonner';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { Filesystem, Directory } from '@capacitor/filesystem';
+import { Share } from '@capacitor/share';
+import { Capacitor } from '@capacitor/core';
 
 interface ResumoFuncionario {
   id: string;
@@ -17,10 +20,11 @@ interface ResumoFuncionario {
   valorBruto: number;
   totalAdiantamentos: number;
   valorLiquido: number;
+  detalhamentoDias: Array<{ data: string; horas: number }>;
 }
 
 export default function AcertoFinal() {
-  const { funcionarios, registros, adiantamentos, safras, safraAtiva, ajustes } = useApp();
+  const { funcionarios, registros, adiantamentos, safras, safraAtiva, ajustes, workLabel } = useApp();
   const [selectedFunc, setSelectedFunc] = useState<string | null>(null);
 
   const safra = safras.find(s => s.id === safraAtiva);
@@ -35,18 +39,47 @@ export default function AcertoFinal() {
 
     let diasTrabalhados = 0;
     let horasTotais = 0;
+    const detalhamentoDias: Array<{ data: string; horas: number }> = [];
 
-    // Check individual adjustments
     const ajustesFunc = ajustes.filter(a => a.funcionarioId === funcId && a.safraId === safraAtiva);
-    const ausenciaDatas = new Set(ajustesFunc.filter(a => a.tipo === 'ausencia').map(a => a.data));
+    
+    // Get all unique dates from registros
+    const allDates = Array.from(new Set(registrosSafra.map(r => format(parseISO(r.data), 'yyyy-MM-dd'))));
+    
+    allDates.forEach(dateStr => {
+      const registrosDoDia = registrosSafra.filter(r => format(parseISO(r.data), 'yyyy-MM-dd') === dateStr);
+      
+      let horasDoDia = 0;
+      let trabalhouNoDia = false;
 
-    registrosSafra.forEach(r => {
-      if (ausenciaDatas.has(r.data)) return; // skip days with absence for this employee
-      if (r.status === 'trabalhou' || r.status === 'outro') {
-        // Check if this employee has different hours for this day
-        const ajusteHoras = ajustesFunc.find(a => a.tipo === 'horas_diferentes' && a.data === r.data);
+      // 1. Check for individual point control (status 'finalizado')
+      const pontoIndividual = registrosDoDia.find(r => r.funcionarioId === f.id && r.status === 'finalizado');
+      if (pontoIndividual) {
+        trabalhouNoDia = true;
+        horasDoDia = pontoIndividual.horasTrabalhadas || 0;
+      } else {
+        // 2. Check for individual adjustments
+        const ajuste = ajustesFunc.find(a => format(parseISO(a.data), 'yyyy-MM-dd') === dateStr);
+        if (ajuste) {
+          if (ajuste.tipo === 'ausencia') return; // Skip day
+          if (ajuste.tipo === 'horas_diferentes') {
+            trabalhouNoDia = true;
+            horasDoDia = ajuste.horasTrabalhadas || 0;
+          }
+        } else {
+          // 3. Check for general records (no funcionarioId)
+          const registroGeral = registrosDoDia.find(r => !r.funcionarioId && (r.status === 'trabalhou' || r.status === 'outro'));
+          if (registroGeral) {
+            trabalhouNoDia = true;
+            horasDoDia = registroGeral.horasTrabalhadas || 0;
+          }
+        }
+      }
+
+      if (trabalhouNoDia) {
         diasTrabalhados++;
-        horasTotais += ajusteHoras ? (ajusteHoras.horasTrabalhadas || 0) : r.horasTrabalhadas;
+        horasTotais += horasDoDia;
+        detalhamentoDias.push({ data: dateStr, horas: horasDoDia });
       }
     });
 
@@ -71,55 +104,92 @@ export default function AcertoFinal() {
       valorBruto,
       totalAdiantamentos: totalAdiantamentos + totalDescontos,
       valorLiquido: valorBruto - totalAdiantamentos - totalDescontos,
+      detalhamentoDias: detalhamentoDias.sort((a, b) => new Date(a.data).getTime() - new Date(b.data).getTime()),
     };
   };
 
-  const exportarPDF = (resumo: ResumoFuncionario) => {
-    const doc = new jsPDF();
-    const adiantamentosFunc = adiantamentos.filter(
-      a => a.funcionarioId === resumo.id && a.safraId === safraAtiva
-    );
+  const exportarPDF = async (resumo: ResumoFuncionario) => {
+    try {
+      const doc = new jsPDF();
+      const adiantamentosFunc = adiantamentos.filter(
+        a => a.funcionarioId === resumo.id && a.safraId === safraAtiva
+      );
 
-    doc.setFontSize(18);
-    doc.text('Acerto Final', 14, 20);
-    doc.setFontSize(12);
-    doc.text(`Funcionário: ${resumo.nome}`, 14, 32);
-    doc.text(`Safra: ${safra?.nome || ''}`, 14, 40);
-    if (safra?.dataInicio && safra?.dataFim) {
-      doc.text(`Período: ${format(new Date(safra.dataInicio), 'dd/MM/yyyy')} - ${format(new Date(safra.dataFim), 'dd/MM/yyyy')}`, 14, 48);
-    }
+      doc.setFontSize(18);
+      doc.text('Acerto Final', 14, 20);
+      doc.setFontSize(12);
+      doc.text(`Funcionário: ${resumo.nome}`, 14, 32);
+      doc.text(`Safra: ${safra?.nome || ''}`, 14, 40);
+      if (safra?.dataInicio && safra?.dataFim) {
+        doc.text(`Período: ${format(parseISO(safra.dataInicio), 'dd/MM/yyyy')} - ${format(parseISO(safra.dataFim), 'dd/MM/yyyy')}`, 14, 48);
+      }
 
-    doc.setFontSize(11);
-    let y = 62;
-    doc.text(`Dias trabalhados: ${resumo.diasTrabalhados}`, 14, y); y += 8;
-    doc.text(`Horas totais: ${resumo.horasTotais.toFixed(2)}h`, 14, y); y += 8;
-    doc.text(`Horas extras: ${resumo.horasExtras >= 0 ? '+' : ''}${resumo.horasExtras.toFixed(2)}h`, 14, y); y += 8;
-    doc.text(`Valor bruto: R$ ${resumo.valorBruto.toFixed(2)}`, 14, y); y += 8;
-    doc.text(`Total descontos: R$ ${resumo.totalAdiantamentos.toFixed(2)}`, 14, y); y += 14;
+      doc.setFontSize(11);
+      let y = 62;
+      doc.text(`Dias trabalhados: ${resumo.diasTrabalhados}`, 14, y); y += 8;
+      doc.text(`Horas totais: ${resumo.horasTotais.toFixed(2)}h`, 14, y); y += 8;
+      doc.text(`Horas extras: ${resumo.horasExtras >= 0 ? '+' : ''}${resumo.horasExtras.toFixed(2)}h`, 14, y); y += 8;
+      doc.text(`Valor bruto: R$ ${resumo.valorBruto.toFixed(2)}`, 14, y); y += 8;
+      doc.text(`Total descontos: R$ ${resumo.totalAdiantamentos.toFixed(2)}`, 14, y); y += 14;
 
-    doc.setFontSize(14);
-    doc.setFont(undefined as any, 'bold');
-    doc.text(`VALOR A RECEBER: R$ ${resumo.valorLiquido.toFixed(2)}`, 14, y);
+      doc.setFontSize(14);
+      doc.setFont(undefined as any, 'bold');
+      doc.text(`VALOR A RECEBER: R$ ${resumo.valorLiquido.toFixed(2)}`, 14, y);
 
-    if (adiantamentosFunc.length > 0) {
-      y += 14;
+      // Tabela de Dias Trabalhados
+      y += 10;
       doc.setFont(undefined as any, 'normal');
       doc.setFontSize(12);
-      doc.text('Detalhamento de Adiantamentos:', 14, y);
-
+      doc.text('Detalhamento de Dias Trabalhados:', 14, y);
+      
       autoTable(doc, {
         startY: y + 6,
-        head: [['Data', 'Valor', 'Descrição']],
-        body: adiantamentosFunc.map(a => [
-          format(new Date(a.data), 'dd/MM/yyyy'),
-          `R$ ${a.valor.toFixed(2)}`,
-          a.descricao || '-',
+        head: [['Data', 'Horas']],
+        body: resumo.detalhamentoDias.map(d => [
+          format(parseISO(d.data), 'dd/MM/yyyy'),
+          `${d.horas.toFixed(2)}h`
         ]),
       });
-    }
 
-    doc.save(`acerto-${resumo.nome.replace(/\s/g, '_')}.pdf`);
-    toast.success('PDF exportado!');
+      y = (doc as any).lastAutoTable.finalY + 10;
+
+      if (adiantamentosFunc.length > 0) {
+        doc.text('Detalhamento de Adiantamentos:', 14, y);
+        autoTable(doc, {
+          startY: y + 6,
+          head: [['Data', 'Valor', 'Descrição']],
+          body: adiantamentosFunc.map(a => [
+            format(parseISO(a.data), 'dd/MM/yyyy'),
+            `R$ ${a.valor.toFixed(2)}`,
+            a.descricao || '-',
+          ]),
+        });
+      }
+
+      const fileName = `acerto-${resumo.nome.replace(/\s/g, '_')}.pdf`;
+      
+      if (Capacitor.isNativePlatform()) {
+        const pdfBase64 = doc.output('datauristring').split(',')[1];
+        const savedFile = await Filesystem.writeFile({
+          path: fileName,
+          data: pdfBase64,
+          directory: Directory.Cache
+        });
+
+        await Share.share({
+          title: 'Exportar Acerto',
+          text: `Acerto final de ${resumo.nome}`,
+          url: savedFile.uri,
+          dialogTitle: 'Compartilhar Acerto'
+        });
+      } else {
+        doc.save(fileName);
+        toast.success('PDF exportado com sucesso!');
+      }
+    } catch (error) {
+      console.error('Erro ao exportar PDF:', error);
+      toast.error('Erro ao gerar ou compartilhar o PDF.');
+    }
   };
 
   if (!safraAtiva) {
@@ -146,9 +216,9 @@ export default function AcertoFinal() {
       <div className="mx-auto max-w-lg">
         <div className="mb-2 flex items-center gap-3">
           <FileText className="h-8 w-8 text-primary" />
-          <h1 className="text-2xl font-bold">Acerto Final</h1>
+          <h1 className="text-2xl font-bold">Acerto</h1>
         </div>
-        <p className="text-sm text-muted-foreground mb-4">Safra: {safra?.nome}</p>
+        <p className="text-sm text-muted-foreground mb-4">{workLabel.charAt(0).toUpperCase() + workLabel.slice(1)}: {safra?.nome}</p>
 
         {funcs.length === 0 ? (
           <Card>
@@ -204,7 +274,7 @@ export default function AcertoFinal() {
                         <span className="font-bold text-lg text-primary">R$ {resumo.valorLiquido.toFixed(2)}</span>
                       </div>
                       <Button onClick={(e) => { e.stopPropagation(); exportarPDF(resumo); }} className="w-full gap-2" variant="outline">
-                        <Download className="h-4 w-4" /> Exportar PDF
+                        <Download className="h-4 w-4" /> Exportar e Compartilhar PDF
                       </Button>
                     </CardContent>
                   )}

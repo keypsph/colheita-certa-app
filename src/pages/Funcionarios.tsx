@@ -8,7 +8,7 @@ import { Users, Plus, Trash2, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function Funcionarios() {
-  const { funcionarios, addFuncionario, deleteFuncionario, safraAtiva, safras } = useApp();
+  const { funcionarios, addFuncionario, deleteFuncionario, safraAtiva, safras, workLabel } = useApp();
   const [nome, setNome] = useState('');
 
   const safra = safras.find(s => s.id === safraAtiva);
@@ -50,9 +50,9 @@ export default function Funcionarios() {
       <div className="mx-auto max-w-lg">
         <div className="mb-2 flex items-center gap-3">
           <Users className="h-8 w-8 text-primary" />
-          <h1 className="text-2xl font-bold">Funcionários</h1>
+          <h1 className="text-2xl font-bold">Equipe</h1>
         </div>
-        <p className="text-sm text-muted-foreground mb-4">Safra: {safra?.nome}</p>
+        <p className="text-sm text-muted-foreground mb-4">{workLabel.charAt(0).toUpperCase() + workLabel.slice(1)}: {safra?.nome}</p>
 
         <div className="flex gap-2 mb-4">
           <Input

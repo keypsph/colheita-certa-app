@@ -80,7 +80,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const addAjuste = (a: AjusteIndividual) => setAjustes(prev => [...prev, a]);
   const deleteAjuste = (id: string) => setAjustes(prev => prev.filter(x => x.id !== id));
 
-  // Start a period for a specific employee. Returns the created registro id.
   const startPeriod = (funcionarioId: string, date?: string, startTime?: string) => {
     if (!safraAtiva) throw new Error('Nenhuma safra/trabalho ativa');
     const now = startTime ? new Date(startTime) : new Date();
@@ -92,11 +91,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
       startTime: now.toISOString(),
       status: 'iniciado',
     };
-    setRegistros(prev => [...prev, registro]);
+    
+    // Check if there is already an initiated period for this employee and remove it
+    setRegistros(prev => {
+      const filtered = prev.filter(r => !(r.funcionarioId === funcionarioId && r.status === 'iniciado'));
+      return [...filtered, registro];
+    });
+    
     return registro.id;
   };
 
-  // Finish a period by registro id. Calculates horasTrabalhadas when possible.
   const finishPeriod = (registroId: string, endTime?: string) => {
     setRegistros(prev => prev.map(r => {
       if (r.id !== registroId) return r;

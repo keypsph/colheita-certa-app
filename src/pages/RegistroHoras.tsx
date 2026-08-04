@@ -169,7 +169,7 @@ export default function RegistroHorasPage() {
       <div className="mx-auto max-w-lg">
         <div className="mb-2 flex items-center gap-3">
           <Clock className="h-8 w-8 text-primary" />
-          <h1 className="text-2xl font-bold">Registro de Horas</h1>
+          <h1 className="text-2xl font-bold">Horas</h1>
         </div>
         <p className="text-sm text-muted-foreground mb-4">{workLabel.charAt(0).toUpperCase() + workLabel.slice(1)}: {safra?.nome} — Vale para todos</p>
 
@@ -504,9 +504,10 @@ export default function RegistroHorasPage() {
                           'text-sm',
                           r.status === 'nao_trabalhou' ? 'text-destructive/80 font-medium' : 'text-muted-foreground'
                         )}>
-                          {r.status === 'trabalhou' && `${r.horasTrabalhadas.toFixed(2)}h trabalhadas`}
+                          {(r.status === 'trabalhou' || r.status === 'finalizado') && `${r.horasTrabalhadas?.toFixed(2)}h trabalhadas`}
                           {r.status === 'nao_trabalhou' && '❌ Não trabalhou'}
-                          {r.status === 'outro' && `${r.horasTrabalhadas.toFixed(2)}h - ${r.motivoOutro}`}
+                          {r.status === 'outro' && `${r.horasTrabalhadas?.toFixed(2)}h - ${r.motivoOutro}`}
+                          {r.status === 'iniciado' && '🟡 Ponto em andamento...'}
                         </p>
                       </div>
                       <Button variant="ghost" size="icon" onClick={() => { deleteRegistro(r.id); toast.success('Registro removido'); }}>

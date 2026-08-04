@@ -10,7 +10,7 @@ import { format } from 'date-fns';
 import { toast } from 'sonner';
 
 export default function Adiantamentos() {
-  const { funcionarios, adiantamentos, addAdiantamento, deleteAdiantamento, safraAtiva, safras } = useApp();
+  const { funcionarios, adiantamentos, addAdiantamento, deleteAdiantamento, safraAtiva, safras, workLabel } = useApp();
   const [selectedFunc, setSelectedFunc] = useState<string | null>(null);
   const [centavos, setCentavos] = useState(0); // valor em centavos para input estilo banco
   const [descricao, setDescricao] = useState('');
@@ -80,9 +80,9 @@ export default function Adiantamentos() {
       <div className="mx-auto max-w-lg">
         <div className="mb-2 flex items-center gap-3">
           <DollarSign className="h-8 w-8 text-primary" />
-          <h1 className="text-2xl font-bold">Adiantamentos</h1>
+          <h1 className="text-2xl font-bold">Adianto</h1>
         </div>
-        <p className="text-sm text-muted-foreground mb-4">Safra: {safra?.nome}</p>
+        <p className="text-sm text-muted-foreground mb-4">{workLabel.charAt(0).toUpperCase() + workLabel.slice(1)}: {safra?.nome}</p>
 
         <p className="text-sm font-medium mb-2">Selecione um funcionário:</p>
         {funcs.length === 0 ? (
