@@ -4,11 +4,12 @@ import { Funcionario } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { Users, Plus, Trash2, AlertCircle } from 'lucide-react';
+import { Users, Plus, Trash2, AlertCircle, Play, Square, Clock } from 'lucide-react';
 import { toast } from 'sonner';
+import { cn } from '@/lib/utils';
 
 export default function Funcionarios() {
-  const { funcionarios, addFuncionario, deleteFuncionario, safraAtiva, safras } = useApp();
+  const { funcionarios, addFuncionario, deleteFuncionario, safraAtiva, safras, startPeriod, finishPeriod, registros } = useApp();
   const [nome, setNome] = useState('');
 
   const safra = safras.find(s => s.id === safraAtiva);
@@ -73,19 +74,58 @@ export default function Funcionarios() {
             </CardContent>
           </Card>
         ) : (
-          <div className="space-y-2">
-            {funcs.map(f => (
-              <Card key={f.id}>
-                <CardContent className="py-3 flex items-center justify-between">
-                  <span className="font-medium">{f.nome}</span>
-                  <Button variant="ghost" size="icon" onClick={() => { deleteFuncionario(f.id); toast.success('Removido!'); }}>
-                    <Trash2 className="h-4 w-4 text-destructive" />
-                  </Button>
-                </CardContent>
-              </Card>
-            ))}
-            <p className="text-sm text-muted-foreground text-center mt-2">
-              {funcs.length} funcionário{funcs.length !== 1 ? 's' : ''}
+          <div className="space-y-3">
+            {funcs.map(f => {
+              const registroAtivo = registros.find(r => r.funcionarioId === f.id && r.status === 'iniciado');
+              
+              return (
+                <Card key={f.id} className={cn("transition-all", registroAtivo && "border-primary bg-primary/5 shadow-md")}>
+                  <CardContent className="py-3">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex flex-col">
+                        <span className="font-bold text-lg">{f.nome}</span>
+                        {registroAtivo && (
+                          <span className="flex items-center gap-1 text-[10px] text-primary font-bold uppercase tracking-wider">
+                            <span className="w-2 h-2 bg-primary rounded-full animate-ping" />
+                            Trabalhando agora
+                          </span>
+                        )}
+                      </div>
+                      <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive" onClick={() => { deleteFuncionario(f.id); toast.success('Removido!'); }}>
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    
+                    <div className="flex gap-2">
+                      {!registroAtivo ? (
+                        <Button 
+                          className="flex-1 gap-2 bg-green-600 hover:bg-green-700 text-white font-bold h-12" 
+                          onClick={() => {
+                            startPeriod(f.id);
+                            toast.success(`Trabalho iniciado para ${f.nome}`);
+                          }}
+                        >
+                          <Play className="h-4 w-4 fill-current" /> Iniciar Ponto
+                        </Button>
+                      ) : (
+                        <Button 
+                          variant="destructive" 
+                          className="flex-1 gap-2 font-bold h-12" 
+                          onClick={() => {
+                            finishPeriod(registroAtivo.id);
+                            toast.success(`Trabalho finalizado para ${f.nome}`);
+                          }}
+                        >
+                          <Square className="h-4 w-4 fill-current" /> Finalizar Ponto
+                        </Button>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
+            <p className="text-sm text-muted-foreground text-center mt-4">
+              {funcs.length} funcionário{funcs.length !== 1 ? 's' : ''} cadastrado{funcs.length !== 1 ? 's' : ''}
             </p>
           </div>
         )}
