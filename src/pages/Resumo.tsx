@@ -49,34 +49,51 @@ export default function Resumo() {
           }
         });
         
-        const pontoIndividual = registrosDoDia.find(r => r.funcionarioId === f.id && r.status === 'finalizado');
-        if (pontoIndividual) {
-          diasFunc++;
-          horasFunc += pontoIndividual.horasTrabalhadas || 0;
-          return;
+        let horasDesteDia = 0;
+        let trabalhouNoDia = false;
+
+        // 1. Somar todos os pontos individuais finalizados deste funcionário no dia
+        const pontosIndividuais = registrosDoDia.filter(r => r.funcionarioId === f.id && r.status === 'finalizado');
+        if (pontosIndividuais.length > 0) {
+          trabalhouNoDia = true;
+          horasDesteDia += pontosIndividuais.reduce((acc, r) => acc + (r.horasTrabalhadas || 0), 0);
         }
 
-        const ajuste = ajustesFunc.find(a => {
+        // 2. Somar ajustes de horas diferentes
+        const ajustesHoras = ajustesFunc.filter(a => {
           try {
-            return a.data && format(parseISO(a.data), 'yyyy-MM-dd') === dateStr;
+            return a.data && format(parseISO(a.data), 'yyyy-MM-dd') === dateStr && a.tipo === 'horas_diferentes';
           } catch (e) {
             return false;
           }
         });
-        
-        if (ajuste) {
-          if (ajuste.tipo === 'ausencia') return;
-          if (ajuste.tipo === 'horas_diferentes') {
-            diasFunc++;
-            horasFunc += ajuste.horasTrabalhadas || 0;
-            return;
+        if (ajustesHoras.length > 0) {
+          trabalhouNoDia = true;
+          horasDesteDia += ajustesHoras.reduce((acc, a) => acc + (a.horasTrabalhadas || 0), 0);
+        }
+
+        // 3. Somar registros gerais (se não houver ponto individual ou ajuste de horas)
+        // Se o usuário usa o ponto individual, ele sobrescreve o geral para aquele dia
+        if (!trabalhouNoDia) {
+          const registrosGerais = registrosDoDia.filter(r => !r.funcionarioId && (r.status === 'trabalhou' || r.status === 'outro'));
+          if (registrosGerais.length > 0) {
+            trabalhouNoDia = true;
+            horasDesteDia += registrosGerais.reduce((acc, r) => acc + (r.horasTrabalhadas || 0), 0);
           }
         }
 
-        const registroGeral = registrosDoDia.find(r => !r.funcionarioId && (r.status === 'trabalhou' || r.status === 'outro'));
-        if (registroGeral) {
+        // 4. Verificar se houve ausência (sobrescreve tudo)
+        const temAusencia = ajustesFunc.some(a => {
+          try {
+            return a.data && format(parseISO(a.data), 'yyyy-MM-dd') === dateStr && a.tipo === 'ausencia';
+          } catch (e) {
+            return false;
+          }
+        });
+
+        if (trabalhouNoDia && !temAusencia) {
           diasFunc++;
-          horasFunc += registroGeral.horasTrabalhadas || 0;
+          horasFunc += horasDesteDia;
         }
       });
 
@@ -102,7 +119,7 @@ export default function Resumo() {
     
     const diasTrabalhadosGeral = Array.from(new Set(
       registrosSafra
-        .filter(r => r.data && r.status !== 'nao_trabalhou' && r.status !== 'iniciado')
+        .filter(r => r.data && (r.status === 'trabalhou' || r.status === 'outro' || r.status === 'finalizado'))
         .map(r => {
           try {
             return format(parseISO(r.data), 'yyyy-MM-dd');

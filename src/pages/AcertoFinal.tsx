@@ -68,41 +68,51 @@ export default function AcertoFinal() {
           }
         });
         
-        let horasDoDia = 0;
+        let horasDesteDia = 0;
         let trabalhouNoDia = false;
 
-        const pontoIndividual = registrosDoDia.find(r => r.funcionarioId === func.id && r.status === 'finalizado');
-        if (pontoIndividual) {
+        // 1. Somar todos os pontos individuais finalizados deste funcionário no dia
+        const pontosIndividuais = registrosDoDia.filter(r => r.funcionarioId === func.id && r.status === 'finalizado');
+        if (pontosIndividuais.length > 0) {
           trabalhouNoDia = true;
-          horasDoDia = pontoIndividual.horasTrabalhadas || 0;
-        } else {
-          const ajuste = ajustesFunc.find(a => {
-            try {
-              return a.data && format(parseISO(a.data), 'yyyy-MM-dd') === dateStr;
-            } catch (e) {
-              return false;
-            }
-          });
-          
-          if (ajuste) {
-            if (ajuste.tipo === 'ausencia') return;
-            if (ajuste.tipo === 'horas_diferentes') {
-              trabalhouNoDia = true;
-              horasDoDia = ajuste.horasTrabalhadas || 0;
-            }
-          } else {
-            const registroGeral = registrosDoDia.find(r => !r.funcionarioId && (r.status === 'trabalhou' || r.status === 'outro'));
-            if (registroGeral) {
-              trabalhouNoDia = true;
-              horasDoDia = registroGeral.horasTrabalhadas || 0;
-            }
+          horasDesteDia += pontosIndividuais.reduce((acc, r) => acc + (r.horasTrabalhadas || 0), 0);
+        }
+
+        // 2. Somar ajustes de horas diferentes
+        const ajustesHoras = ajustesFunc.filter(a => {
+          try {
+            return a.data && format(parseISO(a.data), 'yyyy-MM-dd') === dateStr && a.tipo === 'horas_diferentes';
+          } catch (e) {
+            return false;
+          }
+        });
+        if (ajustesHoras.length > 0) {
+          trabalhouNoDia = true;
+          horasDesteDia += ajustesHoras.reduce((acc, a) => acc + (a.horasTrabalhadas || 0), 0);
+        }
+
+        // 3. Somar registros gerais (se não houver ponto individual ou ajuste de horas)
+        if (!trabalhouNoDia) {
+          const registrosGerais = registrosDoDia.filter(r => !r.funcionarioId && (r.status === 'trabalhou' || r.status === 'outro'));
+          if (registrosGerais.length > 0) {
+            trabalhouNoDia = true;
+            horasDesteDia += registrosGerais.reduce((acc, r) => acc + (r.horasTrabalhadas || 0), 0);
           }
         }
 
-        if (trabalhouNoDia) {
+        // 4. Verificar se houve ausência (sobrescreve tudo)
+        const temAusencia = ajustesFunc.some(a => {
+          try {
+            return a.data && format(parseISO(a.data), 'yyyy-MM-dd') === dateStr && a.tipo === 'ausencia';
+          } catch (e) {
+            return false;
+          }
+        });
+
+        if (trabalhouNoDia && !temAusencia) {
           diasTrabalhados++;
-          horasTotais += horasDoDia;
-          detalhamentoDias.push({ data: dateStr, horas: horasDoDia });
+          horasTotais += horasDesteDia;
+          detalhamentoDias.push({ data: dateStr, horas: horasDesteDia });
         }
       });
 
