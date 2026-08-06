@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useApp } from '@/contexts/AppContext';
 import { RegistroHoras as TRegistro, AjusteIndividual } from '@/types';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Input } from '@/components/ui/input';
@@ -10,11 +10,12 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { format } from 'date-fns';
+import { format, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { Clock, CalendarIcon, Minus, Plus, Save, AlertCircle, Trash2, Calculator, UserMinus } from 'lucide-react';
+import { Clock, CalendarIcon, Minus, Plus, Save, AlertCircle, Trash2, Calculator, UserMinus, Users, Calendar as CalendarIcon2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 
 type Status = 'trabalhou' | 'nao_trabalhou' | 'outro';
 
@@ -49,6 +50,26 @@ export default function RegistroHorasPage() {
   const registrosDaSafra = registros.filter(r => r.safraId === safraAtiva);
   const funcs = funcionarios.filter(f => f.safraId === safraAtiva);
   const ajustesDaSafra = ajustes.filter(a => a.safraId === safraAtiva);
+
+  // Agrupar registros por dia
+  const historicoAgrupado = useMemo(() => {
+    const grupos: Record<string, typeof registrosDaSafra> = {};
+    
+    registrosDaSafra.forEach(r => {
+      try {
+        const dataKey = format(parseISO(r.data), 'yyyy-MM-dd');
+        if (!grupos[dataKey]) grupos[dataKey] = [];
+        grupos[dataKey].push(r);
+      } catch (e) {}
+    });
+
+    return Object.entries(grupos)
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([dataStr, regs]) => {
+        const totalHorasDia = regs.reduce((acc, r) => acc + (r.horasTrabalhadas || 0), 0);
+        return { dataStr, registros: regs, totalHorasDia };
+      });
+  }, [registrosDaSafra]);
 
   const addMin = (n: number) => {
     let totalMin = horas * 60 + minutos + n;
@@ -120,7 +141,6 @@ export default function RegistroHorasPage() {
     }
   };
 
-  // Ajustes individuais
   const handleSaveAjuste = () => {
     if (!ajusteFuncId || !safraAtiva || !data) {
       toast.error('Selecione um funcionário e data');
@@ -165,16 +185,21 @@ export default function RegistroHorasPage() {
   }
 
   return (
-    <div className="min-h-screen pb-20 px-4 pt-6">
-      <div className="mx-auto max-w-lg">
-        <div className="mb-2 flex items-center gap-3">
+    <div className="min-h-screen pb-24 px-4 pt-6">
+      <div className="mx-auto max-w-lg space-y-6">
+        <div className="flex items-center gap-3">
           <Clock className="h-8 w-8 text-primary" />
           <h1 className="text-2xl font-bold">Horas</h1>
         </div>
-        <p className="text-sm text-muted-foreground mb-4">{workLabel.charAt(0).toUpperCase() + workLabel.slice(1)}: {safra?.nome} — Vale para todos</p>
+        <p className="text-sm text-muted-foreground -mt-4">{workLabel.charAt(0).toUpperCase() + workLabel.slice(1)}: {safra?.nome}</p>
 
-        <Card className="mb-4">
-          <CardContent className="pt-4 space-y-4">
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-lg flex items-center gap-2">
+              <Plus className="h-5 w-5 text-primary" /> Registro Geral (Equipe)
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
             <div>
               <Label>Data</Label>
               <Popover>
@@ -196,16 +221,14 @@ export default function RegistroHorasPage() {
                 {[
                   { value: 'trabalhou' as Status, label: 'Trabalhou' },
                   { value: 'nao_trabalhou' as Status, label: 'Não trabalhou' },
-                  { value: 'outro' as Status, label: 'Adicionar motivo' },
+                  { value: 'outro' as Status, label: 'Outro motivo' },
                 ].map(opt => (
                   <Button
                     key={opt.value}
                     variant={status === opt.value ? 'default' : 'outline'}
                     size="sm"
                     onClick={() => setStatus(opt.value)}
-                    className={cn(
-                      status === opt.value && opt.value === 'nao_trabalhou' && 'bg-destructive text-destructive-foreground hover:bg-destructive/90'
-                    )}
+                    className={cn(status === opt.value && opt.value === 'nao_trabalhou' && 'bg-destructive text-destructive-foreground hover:bg-destructive/90')}
                   >
                     {opt.label}
                   </Button>
@@ -213,313 +236,156 @@ export default function RegistroHorasPage() {
               </div>
             </div>
 
-            {status === 'outro' && (
-              <div>
-                <Label>Descrição do motivo</Label>
-                <Input value={motivo} onChange={e => setMotivo(e.target.value)} placeholder="Descreva o motivo..." />
-              </div>
-            )}
-
             {(status === 'trabalhou' || status === 'outro') && (
               <div>
                 <Label>Horas Trabalhadas</Label>
                 <div className="flex items-center justify-center gap-3 mt-2">
-                  <Button variant="outline" size="icon" onClick={() => addMin(-15)} className="h-12 w-12 rounded-full">
-                    <Minus className="h-5 w-5" />
-                  </Button>
+                  <Button variant="outline" size="icon" onClick={() => addMin(-15)} className="h-12 w-12 rounded-full"><Minus className="h-5 w-5" /></Button>
                   {editingTime ? (
-                    <div className="flex items-center gap-1">
-                      <Input
-                        value={editTimeValue}
-                        onChange={e => setEditTimeValue(e.target.value)}
-                        onKeyDown={e => e.key === 'Enter' && handleTimeConfirm()}
-                        onBlur={handleTimeConfirm}
-                        className="w-24 text-center text-xl font-bold"
-                        autoFocus
-                        placeholder="8:00"
-                      />
-                    </div>
+                    <Input value={editTimeValue} onChange={e => setEditTimeValue(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleTimeConfirm()} onBlur={handleTimeConfirm} className="w-24 text-center text-xl font-bold" autoFocus />
                   ) : (
-                    <div
-                      onClick={handleTimeClick}
-                      className="bg-primary text-primary-foreground rounded-xl px-6 py-3 text-2xl font-bold min-w-[120px] text-center cursor-pointer hover:opacity-90 transition-opacity"
-                      title="Clique para editar"
-                    >
-                      {horas}h{minutos > 0 ? `${String(minutos).padStart(2, '0')}` : '00'}
-                    </div>
+                    <div onClick={handleTimeClick} className="bg-primary text-primary-foreground rounded-xl px-6 py-3 text-2xl font-bold min-w-[120px] text-center cursor-pointer">{horas}h{minutos > 0 ? String(minutos).padStart(2, '0') : '00'}</div>
                   )}
-                  <Button variant="outline" size="icon" onClick={() => addMin(15)} className="h-12 w-12 rounded-full">
-                    <Plus className="h-5 w-5" />
-                  </Button>
+                  <Button variant="outline" size="icon" onClick={() => addMin(15)} className="h-12 w-12 rounded-full"><Plus className="h-5 w-5" /></Button>
                 </div>
-                <p className="text-xs text-muted-foreground text-center mt-1">Toque no horário para editar ou use + / -</p>
               </div>
             )}
 
-            <Button onClick={handleSave} className="w-full gap-2">
-              <Save className="h-4 w-4" /> Salvar Registro
-            </Button>
+            <Button onClick={handleSave} className="w-full gap-2"><Save className="h-4 w-4" /> Salvar Registro Geral</Button>
           </CardContent>
         </Card>
 
-        {/* Separador - Ferramentas extras */}
-        <Separator className="my-6" />
-
-        <div className="space-y-3 mb-6">
-          {/* Ajustes individuais */}
-          <Button variant="outline" className="w-full gap-2" onClick={() => setShowAjuste(true)}>
-            <UserMinus className="h-4 w-4" /> Ajuste Individual de Funcionário
-          </Button>
-
-          {/* Calculadora de horas */}
-          <Button variant="outline" className="w-full gap-2" onClick={() => setShowCalc(true)}>
-            <Calculator className="h-4 w-4" /> Calculadora de Horas
-          </Button>
-        </div>
-
-        {/* Dialog ajuste individual */}
-        <Dialog open={showAjuste} onOpenChange={setShowAjuste}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Ajuste Individual</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-4">
-              <div>
-                <Label>Funcionário</Label>
-                <Select value={ajusteFuncId} onValueChange={setAjusteFuncId}>
-                  <SelectTrigger><SelectValue placeholder="Selecione..." /></SelectTrigger>
-                  <SelectContent>
-                    {funcs.map(f => (
-                      <SelectItem key={f.id} value={f.id}>{f.nome}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label>Tipo de ajuste</Label>
-                <Select value={ajusteTipo} onValueChange={(v) => setAjusteTipo(v as any)}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="ausencia">Não foi trabalhar</SelectItem>
-                    <SelectItem value="horas_diferentes">Horas diferentes</SelectItem>
-                    <SelectItem value="desconto">Desconto no dia</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              {ajusteTipo === 'horas_diferentes' && (
-                <div>
-                  <Label>Horas trabalhadas</Label>
-                  <Input type="number" value={ajusteHoras} onChange={e => setAjusteHoras(e.target.value)} placeholder="Ex: 6" />
-                </div>
-              )}
-              {ajusteTipo === 'desconto' && (
-                <div>
-                  <Label>Valor do desconto (R$)</Label>
-                  <Input type="number" value={ajusteDesconto} onChange={e => setAjusteDesconto(e.target.value)} placeholder="Ex: 50" />
-                </div>
-              )}
-              <div>
-                <Label>Motivo (opcional)</Label>
-                <Input value={ajusteMotivo} onChange={e => setAjusteMotivo(e.target.value)} placeholder="Ex: Saiu mais cedo" />
-              </div>
-              <Button onClick={handleSaveAjuste} className="w-full">Salvar Ajuste</Button>
-            </div>
-
-            {ajustesDaSafra.length > 0 && (
-              <div className="mt-4">
-                <p className="font-medium text-sm mb-2">Ajustes registrados:</p>
-                <div className="space-y-1 max-h-40 overflow-y-auto">
-                  {ajustesDaSafra.map(a => {
-                    const func = funcs.find(f => f.id === a.funcionarioId);
-                    return (
-                      <div key={a.id} className="flex items-center justify-between text-xs bg-muted rounded-lg px-3 py-2">
-                        <div>
-                          <span className="font-medium">{func?.nome}</span>
-                          <span className="text-muted-foreground ml-2">
-                            {a.tipo === 'ausencia' && 'Ausência'}
-                            {a.tipo === 'horas_diferentes' && `${a.horasTrabalhadas}h`}
-                            {a.tipo === 'desconto' && `- R$ ${a.valorDesconto?.toFixed(2)}`}
-                          </span>
-                          <span className="text-muted-foreground ml-1">{format(new Date(a.data), 'dd/MM')}</span>
-                        </div>
-                        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => { deleteAjuste(a.id); toast.success('Removido'); }}>
-                          <Trash2 className="h-3 w-3 text-destructive" />
-                        </Button>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </DialogContent>
-        </Dialog>
-
-        {/* Dialog calculadora de horas */}
-        <Dialog open={showCalc} onOpenChange={setShowCalc}>
-          <DialogContent className="max-w-sm">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                <Calculator className="h-5 w-5" /> Calculadora de Horas
-              </DialogTitle>
-            </DialogHeader>
-            <div className="space-y-3">
-              {periodos.map((p, i) => (
-                <div key={i}>
-                  <div className="flex items-end gap-2">
-                    <div className="flex-1">
-                      <Label className="text-xs">Comecei às</Label>
-                      <Input
-                        type="time"
-                        value={p.inicio}
-                        onChange={e => updatePeriodo(i, 'inicio', e.target.value)}
-                      />
-                    </div>
-                    <div className="flex-1">
-                      <Label className="text-xs">Parei às</Label>
-                      <Input
-                        type="time"
-                        value={p.fim}
-                        onChange={e => updatePeriodo(i, 'fim', e.target.value)}
-                      />
-                    </div>
-                    <div className="min-w-[60px] text-center">
-                      <Label className="text-xs">Total</Label>
-                      <div className="bg-muted rounded-lg px-2 py-2 text-sm font-bold">
-                        {Math.floor(calcPeriodo(p) / 60)}h{String(calcPeriodo(p) % 60).padStart(2, '0')}
-                      </div>
-                    </div>
-                    {periodos.length > 1 && (
-                      <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => removePeriodo(i)}>
-                        <Trash2 className="h-3 w-3 text-destructive" />
-                      </Button>
-                    )}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-lg flex items-center gap-2">
+              <Users className="h-5 w-5 text-primary" /> Controle de Ponto Individual
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {funcs.map(f => {
+              const pontoAtivo = registrosDaSafra.find(r => r.funcionarioId === f.id && r.status === 'iniciado');
+              return (
+                <div key={f.id} className="flex items-center justify-between bg-muted/50 p-3 rounded-lg border">
+                  <div>
+                    <p className="font-medium">{f.nome}</p>
+                    {pontoAtivo && <p className="text-[10px] text-primary font-bold animate-pulse">TRABALHANDO AGORA...</p>}
                   </div>
+                  {pontoAtivo ? (
+                    <Button size="sm" variant="destructive" onClick={() => finishPeriod(pontoAtivo.id)}>Finalizar</Button>
+                  ) : (
+                    <Button size="sm" variant="outline" className="border-primary text-primary hover:bg-primary/10" onClick={() => startPeriod(f.id)}>Iniciar</Button>
+                  )}
                 </div>
-              ))}
+              );
+            })}
+          </CardContent>
+        </Card>
 
-              <Button variant="outline" className="w-full gap-2" onClick={addPeriodo}>
-                <Plus className="h-4 w-4" /> Adicionar período
-              </Button>
-
-              <div className="bg-primary text-primary-foreground rounded-xl px-4 py-3 text-center">
-                <p className="text-xs opacity-80">Total do dia</p>
-                <p className="text-2xl font-bold">{totalCalcHoras}h{String(totalCalcMins).padStart(2, '0')}</p>
-              </div>
-
-              <Button
-                className="w-full"
-                onClick={() => {
-                  setHoras(totalCalcHoras);
-                  setMinutos(totalCalcMins);
-                  setShowCalc(false);
-                  toast.success('Horas aplicadas!');
-                }}
-              >
-                Usar este horário
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
-
-        {/* Controle de Ponto Individual */}
-        <div className="mb-6">
-          <h2 className="font-semibold mb-3 flex items-center gap-2">
-            <Clock className="h-5 w-5 text-primary" /> Controle de Ponto Individual
-          </h2>
-          <div className="space-y-3">
-            {funcs.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-4 bg-muted rounded-lg">Nenhum funcionário cadastrado.</p>
-            ) : (
-              funcs.map(f => {
-                const registroAtivo = registros.find(r => r.funcionarioId === f.id && r.status === 'iniciado');
-                
-                return (
-                  <Card key={f.id} className={cn("transition-all", registroAtivo && "border-primary bg-primary/5 shadow-sm")}>
-                    <CardContent className="py-3 flex items-center justify-between">
-                      <div className="flex flex-col">
-                        <span className="font-medium">{f.nome}</span>
-                        {registroAtivo && (
-                          <span className="text-[10px] text-primary font-bold animate-pulse flex items-center gap-1">
-                            <span className="w-1.5 h-1.5 bg-primary rounded-full" /> EM TRABALHO
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex gap-2">
-                        {!registroAtivo ? (
-                          <Button 
-                            size="sm" 
-                            className="bg-green-600 hover:bg-green-700 text-white gap-1 px-3"
-                            onClick={() => {
-                              startPeriod(f.id);
-                              toast.success(`Ponto iniciado para ${f.nome}`);
-                            }}
-                          >
-                            <Plus className="h-3.5 w-3.5" /> Iniciar
-                          </Button>
-                        ) : (
-                          <Button 
-                            size="sm" 
-                            variant="destructive" 
-                            className="gap-1 px-3"
-                            onClick={() => {
-                              finishPeriod(registroAtivo.id);
-                              toast.success(`Ponto finalizado para ${f.nome}`);
-                            }}
-                          >
-                            <Save className="h-3.5 w-3.5" /> Finalizar
-                          </Button>
-                        )}
-                      </div>
-                    </CardContent>
-                  </Card>
-                );
-              })
-            )}
-          </div>
+        <div className="grid grid-cols-2 gap-3">
+          <Button variant="outline" size="sm" className="gap-2" onClick={() => setShowAjuste(true)}><UserMinus className="h-4 w-4" /> Ajuste Indiv.</Button>
+          <Button variant="outline" size="sm" className="gap-2" onClick={() => setShowCalc(true)}><Calculator className="h-4 w-4" /> Calculadora</Button>
         </div>
 
-        {/* Histórico */}
-        {registrosDaSafra.length > 0 && (
-          <div>
-            <h2 className="font-semibold mb-2">Histórico</h2>
-            <div className="space-y-2">
-              {registrosDaSafra
-                .sort((a, b) => new Date(b.data).getTime() - new Date(a.data).getTime())
-                .map(r => (
-                  <Card
-                    key={r.id}
-                    className={cn(
-                      r.status === 'nao_trabalhou' && 'border-destructive/50 bg-destructive/5'
-                    )}
-                  >
-                    <CardContent className="py-3 flex items-center justify-between">
-                      <div>
-                        <p className={cn(
-                          'font-medium',
-                          r.status === 'nao_trabalhou' && 'text-destructive'
-                        )}>
-                          {format(new Date(r.data), 'dd/MM/yyyy')}
-                        </p>
-                        <p className={cn(
-                          'text-sm',
-                          r.status === 'nao_trabalhou' ? 'text-destructive/80 font-medium' : 'text-muted-foreground'
-                        )}>
-                          {(r.status === 'trabalhou' || r.status === 'finalizado') && `${r.horasTrabalhadas?.toFixed(2)}h trabalhadas`}
-                          {r.status === 'nao_trabalhou' && '❌ Não trabalhou'}
-                          {r.status === 'outro' && `${r.horasTrabalhadas?.toFixed(2)}h - ${r.motivoOutro}`}
-                          {r.status === 'iniciado' && '🟡 Ponto em andamento...'}
-                        </p>
+        <div className="space-y-3">
+          <h2 className="text-lg font-bold flex items-center gap-2"><CalendarIcon2 className="h-5 w-5 text-primary" /> Histórico Agrupado</h2>
+          {historicoAgrupado.map((grupo) => (
+            <Card key={grupo.dataStr} className="overflow-hidden border-l-4 border-l-primary">
+              <Accordion type="single" collapsible className="w-full">
+                <AccordionItem value="item-1" className="border-none">
+                  <AccordionTrigger className="px-4 py-3 hover:no-underline">
+                    <div className="flex items-center justify-between w-full pr-4">
+                      <div className="text-left">
+                        <p className="font-bold text-sm">{format(parseISO(grupo.dataStr), "dd 'de' MMMM", { locale: ptBR })}</p>
+                        <p className="text-xs text-muted-foreground capitalize">{format(parseISO(grupo.dataStr), 'eeee', { locale: ptBR })}</p>
                       </div>
-                      <Button variant="ghost" size="icon" onClick={() => { deleteRegistro(r.id); toast.success('Registro removido'); }}>
-                        <Trash2 className="h-4 w-4 text-destructive" />
-                      </Button>
-                    </CardContent>
-                  </Card>
-                ))}
-            </div>
-          </div>
-        )}
+                      <div className="text-right">
+                        <p className="text-sm font-bold text-primary">{grupo.totalHorasDia.toFixed(2)}h</p>
+                        <p className="text-[10px] text-muted-foreground">Total da Equipe</p>
+                      </div>
+                    </div>
+                  </AccordionTrigger>
+                  <AccordionContent className="px-4 pb-4 pt-0 border-t">
+                    <div className="space-y-2 mt-3">
+                      {grupo.registros.map((r) => {
+                        const func = funcionarios.find(f => f.id === r.funcionarioId);
+                        return (
+                          <div key={r.id} className="flex items-center justify-between text-sm bg-muted/30 p-2 rounded">
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium">{func ? func.nome : 'Registro Geral'}</span>
+                              {r.status === 'iniciado' && <span className="text-[10px] bg-primary/20 text-primary px-1.5 rounded-full font-bold">EM ABERTO</span>}
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <span className="font-mono font-semibold">{r.horasTrabalhadas?.toFixed(2) || '0.00'}h</span>
+                              <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => deleteRegistro(r.id)}><Trash2 className="h-3.5 w-3.5" /></Button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </AccordionContent>
+                </AccordionItem>
+              </Accordion>
+            </Card>
+          ))}
+        </div>
       </div>
+
+      {/* Dialogs: Calculadora e Ajuste permanecem iguais */}
+      <Dialog open={showCalc} onOpenChange={setShowCalc}>
+        <DialogContent className="max-w-[90vw] rounded-xl">
+          <DialogHeader><DialogTitle>Calculadora de Horas</DialogTitle></DialogHeader>
+          <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-2">
+            {periodos.map((p, i) => (
+              <div key={i} className="flex items-end gap-2 bg-muted/30 p-3 rounded-lg relative">
+                <div className="flex-1 space-y-1">
+                  <Label className="text-xs">Início</Label>
+                  <Input type="time" value={p.inicio} onChange={e => updatePeriodo(i, 'inicio', e.target.value)} />
+                </div>
+                <div className="flex-1 space-y-1">
+                  <Label className="text-xs">Fim</Label>
+                  <Input type="time" value={p.fim} onChange={e => updatePeriodo(i, 'fim', e.target.value)} />
+                </div>
+                <Button variant="ghost" size="icon" className="text-destructive h-10 w-10" onClick={() => removePeriodo(i)}><Trash2 className="h-4 w-4" /></Button>
+              </div>
+            ))}
+            <Button variant="outline" onClick={addPeriodo} className="w-full border-dashed"><Plus className="h-4 w-4 mr-2" /> Adicionar Período</Button>
+            <div className="bg-primary/10 p-4 rounded-xl text-center">
+              <p className="text-sm text-muted-foreground">Total Calculado</p>
+              <p className="text-3xl font-bold text-primary">{totalCalcHoras}h{String(totalCalcMins).padStart(2, '0')}</p>
+            </div>
+            <Button className="w-full" onClick={() => { setHoras(totalCalcHoras); setMinutos(totalCalcMins); setShowCalc(false); }}>Usar este tempo</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showAjuste} onOpenChange={setShowAjuste}>
+        <DialogContent className="max-w-[90vw] rounded-xl">
+          <DialogHeader><DialogTitle>Ajuste Individual</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label>Funcionário</Label>
+              <Select value={ajusteFuncId} onValueChange={setAjusteFuncId}>
+                <SelectTrigger><SelectValue placeholder="Selecione..." /></SelectTrigger>
+                <SelectContent>{funcs.map(f => <SelectItem key={f.id} value={f.id}>{f.nome}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Tipo</Label>
+              <Select value={ajusteTipo} onValueChange={(v) => setAjusteTipo(v as any)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ausencia">Ausência</SelectItem>
+                  <SelectItem value="horas_diferentes">Horas Diferentes</SelectItem>
+                  <SelectItem value="desconto">Desconto R$</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {ajusteTipo === 'horas_diferentes' && <Input type="number" value={ajusteHoras} onChange={e => setAjusteHoras(e.target.value)} placeholder="Horas" />}
+            {ajusteTipo === 'desconto' && <Input type="number" value={ajusteDesconto} onChange={e => setAjusteDesconto(e.target.value)} placeholder="Valor R$" />}
+            <Button className="w-full" onClick={handleSaveAjuste}>Salvar Ajuste</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
