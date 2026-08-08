@@ -16,6 +16,18 @@ import { Clock, CalendarIcon, Minus, Plus, Save, AlertCircle, Trash2, Calculator
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { Carousel, CarouselContent, CarouselItem } from "@/components/ui/carousel";
 
 type Status = 'trabalhou' | 'nao_trabalhou' | 'outro';
 
@@ -51,25 +63,35 @@ export default function RegistroHorasPage() {
   const funcs = funcionarios.filter(f => f.safraId === safraAtiva);
   const ajustesDaSafra = ajustes.filter(a => a.safraId === safraAtiva);
 
-  // Agrupar registros por dia
-  const historicoAgrupado = useMemo(() => {
-    const grupos: Record<string, typeof registrosDaSafra> = {};
-    
-    registrosDaSafra.forEach(r => {
-      try {
-        const dataKey = format(parseISO(r.data), 'yyyy-MM-dd');
-        if (!grupos[dataKey]) grupos[dataKey] = [];
-        grupos[dataKey].push(r);
-      } catch (e) {}
-    });
-
-    return Object.entries(grupos)
-      .sort((a, b) => b[0].localeCompare(a[0]))
-      .map(([dataStr, regs]) => {
-        const totalHorasDia = regs.reduce((acc, r) => acc + (r.horasTrabalhadas || 0), 0);
-        return { dataStr, registros: regs, totalHorasDia };
-      });
-  }, [registrosDaSafra]);
+	  // Agrupar registros por dia e por funcionário
+	  const historicoAgrupado = useMemo(() => {
+	    const grupos: Record<string, typeof registrosDaSafra> = {};
+	    
+	    registrosDaSafra.forEach(r => {
+	      try {
+	        const dataKey = format(parseISO(r.data), 'yyyy-MM-dd');
+	        if (!grupos[dataKey]) grupos[dataKey] = [];
+	        grupos[dataKey].push(r);
+	      } catch (e) {}
+	    });
+	
+	    return Object.entries(grupos)
+	      .sort((a, b) => b[0].localeCompare(a[0]))
+	      .map(([dataStr, regs]) => {
+	        const totalHorasDia = regs.reduce((acc, r) => acc + (r.horasTrabalhadas || 0), 0);
+	        
+	        // Calcular totais por funcionário no dia
+	        const totaisPorFunc: Record<string, number> = {};
+	        regs.forEach(r => {
+	          if (r.status === 'finalizado' || r.status === 'trabalhou' || r.status === 'outro') {
+	            const key = r.funcionarioId || 'geral';
+	            totaisPorFunc[key] = (totaisPorFunc[key] || 0) + (r.horasTrabalhadas || 0);
+	          }
+	        });
+	
+	        return { dataStr, registros: regs, totalHorasDia, totaisPorFunc };
+	      });
+	  }, [registrosDaSafra]);
 
   const addMin = (n: number) => {
     let totalMin = horas * 60 + minutos + n;
@@ -286,48 +308,99 @@ export default function RegistroHorasPage() {
           <Button variant="outline" size="sm" className="gap-2" onClick={() => setShowCalc(true)}><Calculator className="h-4 w-4" /> Calculadora</Button>
         </div>
 
-        <div className="space-y-3">
-          <h2 className="text-lg font-bold flex items-center gap-2"><CalendarIcon2 className="h-5 w-5 text-primary" /> Histórico Agrupado</h2>
-          {historicoAgrupado.map((grupo) => (
-            <Card key={grupo.dataStr} className="overflow-hidden border-l-4 border-l-primary">
-              <Accordion type="single" collapsible className="w-full">
-                <AccordionItem value="item-1" className="border-none">
-                  <AccordionTrigger className="px-4 py-3 hover:no-underline">
-                    <div className="flex items-center justify-between w-full pr-4">
-                      <div className="text-left">
-                        <p className="font-bold text-sm">{format(parseISO(grupo.dataStr), "dd 'de' MMMM", { locale: ptBR })}</p>
-                        <p className="text-xs text-muted-foreground capitalize">{format(parseISO(grupo.dataStr), 'eeee', { locale: ptBR })}</p>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-sm font-bold text-primary">{grupo.totalHorasDia.toFixed(2)}h</p>
-                        <p className="text-[10px] text-muted-foreground">Total da Equipe</p>
-                      </div>
-                    </div>
-                  </AccordionTrigger>
-                  <AccordionContent className="px-4 pb-4 pt-0 border-t">
-                    <div className="space-y-2 mt-3">
-                      {grupo.registros.map((r) => {
-                        const func = funcionarios.find(f => f.id === r.funcionarioId);
-                        return (
-                          <div key={r.id} className="flex items-center justify-between text-sm bg-muted/30 p-2 rounded">
-                            <div className="flex items-center gap-2">
-                              <span className="font-medium">{func ? func.nome : 'Registro Geral'}</span>
-                              {r.status === 'iniciado' && <span className="text-[10px] bg-primary/20 text-primary px-1.5 rounded-full font-bold">EM ABERTO</span>}
-                            </div>
-                            <div className="flex items-center gap-3">
-                              <span className="font-mono font-semibold">{r.horasTrabalhadas?.toFixed(2) || '0.00'}h</span>
-                              <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => deleteRegistro(r.id)}><Trash2 className="h-3.5 w-3.5" /></Button>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </AccordionContent>
-                </AccordionItem>
-              </Accordion>
-            </Card>
-          ))}
-        </div>
+	        <div className="space-y-3">
+	          <div className="flex items-center justify-between">
+	            <h2 className="text-lg font-bold flex items-center gap-2"><CalendarIcon2 className="h-5 w-5 text-primary" /> Histórico</h2>
+	            <p className="text-[10px] text-muted-foreground animate-pulse">Deslize nos cards para ver totais ↔️</p>
+	          </div>
+	          
+	          {historicoAgrupado.map((grupo) => (
+	            <Card key={grupo.dataStr} className="overflow-hidden border-l-4 border-l-primary">
+	              <Carousel className="w-full">
+	                <CarouselContent>
+	                  {/* Lado 1: Lista de Batidas */}
+	                  <CarouselItem>
+	                    <Accordion type="single" collapsible className="w-full">
+	                      <AccordionItem value="item-1" className="border-none">
+	                        <AccordionTrigger className="px-4 py-3 hover:no-underline">
+	                          <div className="flex items-center justify-between w-full pr-4">
+	                            <div className="text-left">
+	                              <p className="font-bold text-sm">{format(parseISO(grupo.dataStr), "dd 'de' MMMM", { locale: ptBR })}</p>
+	                              <p className="text-xs text-muted-foreground capitalize">{format(parseISO(grupo.dataStr), 'eeee', { locale: ptBR })}</p>
+	                            </div>
+	                            <div className="text-right">
+	                              <p className="text-sm font-bold text-primary">{grupo.totalHorasDia.toFixed(2)}h</p>
+	                              <p className="text-[10px] text-muted-foreground">Total da Equipe</p>
+	                            </div>
+	                          </div>
+	                        </AccordionTrigger>
+	                        <AccordionContent className="px-4 pb-4 pt-0 border-t">
+	                          <div className="space-y-2 mt-3">
+	                            {grupo.registros.map((r) => {
+	                              const func = funcionarios.find(f => f.id === r.funcionarioId);
+	                              return (
+	                                <div key={r.id} className="flex items-center justify-between text-sm bg-muted/30 p-2 rounded">
+	                                  <div className="flex items-center gap-2">
+	                                    <span className="font-medium">{func ? func.nome : 'Registro Geral'}</span>
+	                                    {r.status === 'iniciado' && <span className="text-[10px] bg-primary/20 text-primary px-1.5 rounded-full font-bold">EM ABERTO</span>}
+	                                  </div>
+	                                  <div className="flex items-center gap-3">
+	                                    <span className="font-mono font-semibold">{r.horasTrabalhadas?.toFixed(2) || '0.00'}h</span>
+	                                    <AlertDialog>
+	                                      <AlertDialogTrigger asChild>
+	                                        <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive"><Trash2 className="h-3.5 w-3.5" /></Button>
+	                                      </AlertDialogTrigger>
+	                                      <AlertDialogContent className="max-w-[90vw] rounded-xl">
+	                                        <AlertDialogHeader>
+	                                          <AlertDialogTitle>Excluir Registro?</AlertDialogTitle>
+	                                          <AlertDialogDescription>
+	                                            Esta ação não pode ser desfeita. O registro de {r.horasTrabalhadas?.toFixed(2)}h será removido permanentemente.
+	                                          </AlertDialogDescription>
+	                                        </AlertDialogHeader>
+	                                        <AlertDialogFooter>
+	                                          <AlertDialogCancel>Cancelar</AlertDialogCancel>
+	                                          <AlertDialogAction onClick={() => { deleteRegistro(r.id); toast.success('Registro excluído'); }} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Excluir</AlertDialogAction>
+	                                        </AlertDialogFooter>
+	                                      </AlertDialogContent>
+	                                    </AlertDialog>
+	                                  </div>
+	                                </div>
+	                              );
+	                            })}
+	                          </div>
+	                        </AccordionContent>
+	                      </AccordionItem>
+	                    </Accordion>
+	                  </CarouselItem>
+
+	                  {/* Lado 2: Totais Diários por Funcionário */}
+	                  <CarouselItem>
+	                    <div className="p-4 space-y-3 h-full flex flex-col justify-center">
+	                      <div className="flex items-center gap-2 mb-1">
+	                        <Users className="h-4 w-4 text-primary" />
+	                        <p className="text-xs font-bold uppercase text-muted-foreground">Total Individual no Dia</p>
+	                      </div>
+	                      <div className="grid grid-cols-1 gap-2">
+	                        {Object.entries(grupo.totaisPorFunc).map(([id, total]) => {
+	                          const func = funcionarios.find(f => f.id === id);
+	                          return (
+	                            <div key={id} className="flex items-center justify-between bg-primary/5 border border-primary/10 p-2 rounded-lg">
+	                              <span className="text-sm font-medium">{func ? func.nome : 'Registro Geral'}</span>
+	                              <span className="text-sm font-bold text-primary">{total.toFixed(2)}h</span>
+	                            </div>
+	                          );
+	                        })}
+	                        {Object.keys(grupo.totaisPorFunc).length === 0 && (
+	                          <p className="text-xs text-muted-foreground italic">Nenhuma hora finalizada neste dia.</p>
+	                        )}
+	                      </div>
+	                    </div>
+	                  </CarouselItem>
+	                </CarouselContent>
+	              </Carousel>
+	            </Card>
+	          ))}
+	        </div>
       </div>
 
       {/* Dialogs: Calculadora e Ajuste permanecem iguais */}

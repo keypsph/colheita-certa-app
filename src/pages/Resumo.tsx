@@ -98,10 +98,11 @@ export default function Resumo() {
       });
 
       const vd = f.valorDiaria || valorDiaria;
-      const vh = vd / horasPadrao;
-      const bruto = horasFunc * vh;
+      const vh = Math.round((vd / horasPadrao + Number.EPSILON) * 100) / 100;
+      const bruto = Math.round((horasFunc * vh + Number.EPSILON) * 100) / 100;
       const adiant = adiantamentos.filter(a => a.funcionarioId === f.id && a.safraId === safraAtiva).reduce((s, a) => s + a.valor, 0);
       const desc = ajustesFunc.filter(a => a.tipo === 'desconto').reduce((s, a) => s + (a.valorDesconto || 0), 0);
+      const liquido = Math.round((bruto - adiant - desc + Number.EPSILON) * 100) / 100;
 
       return {
         id: f.id,
@@ -111,7 +112,7 @@ export default function Resumo() {
         valorBruto: bruto,
         adiantamentos: adiant,
         descontos: desc,
-        liquido: bruto - adiant - desc,
+        liquido,
       };
     });
 

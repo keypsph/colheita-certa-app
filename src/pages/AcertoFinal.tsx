@@ -38,7 +38,9 @@ export default function AcertoFinal() {
 
       const horasPadrao = safra?.horasPadrao || 8;
       const valorDiaria = func.valorDiaria || safra?.valorDiaria || 0;
-      const valorHora = valorDiaria / horasPadrao;
+      
+      // Cálculo preciso do valor por hora para evitar erros de arredondamento (ex: 160/8 = 20.00)
+      const valorHora = Math.round((valorDiaria / horasPadrao + Number.EPSILON) * 100) / 100;
 
       let diasTrabalhados = 0;
       let horasTotais = 0;
@@ -117,8 +119,10 @@ export default function AcertoFinal() {
       });
 
       const horasEsperadas = diasTrabalhados * horasPadrao;
-      const horasExtras = horasTotais - horasEsperadas;
-      const valorBruto = horasTotais * valorHora;
+      const horasExtras = Math.round((horasTotais - horasEsperadas + Number.EPSILON) * 100) / 100;
+      
+      // Valor bruto calculado com arredondamento de centavos para precisão financeira
+      const valorBruto = Math.round((horasTotais * valorHora + Number.EPSILON) * 100) / 100;
 
       const totalAdiantamentos = adiantamentos
         .filter(a => a.funcionarioId === funcId && a.safraId === safraAtiva)
@@ -128,6 +132,8 @@ export default function AcertoFinal() {
         .filter(a => a.tipo === 'desconto')
         .reduce((sum, a) => sum + (a.valorDesconto || 0), 0);
 
+      const valorLiquido = Math.round((valorBruto - totalAdiantamentos - totalDescontos + Number.EPSILON) * 100) / 100;
+
       return {
         id: funcId,
         nome: func.nome,
@@ -136,7 +142,7 @@ export default function AcertoFinal() {
         horasExtras,
         valorBruto,
         totalAdiantamentos: totalAdiantamentos + totalDescontos,
-        valorLiquido: valorBruto - totalAdiantamentos - totalDescontos,
+        valorLiquido,
         detalhamentoDias: detalhamentoDias.sort((a, b) => new Date(a.data).getTime() - new Date(b.data).getTime()),
       };
     } catch (e) {
